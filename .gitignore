@@ -1,0 +1,15 @@
+# Node.js dependencies
+node_modules/
+
+# Log files
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE-specific files
+.idea/
+
+# Lock file (optional, include if you want version consistency)
+package-lock.json

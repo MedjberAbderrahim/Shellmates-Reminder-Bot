@@ -3,84 +3,133 @@ const crypto = require('crypto'); // For generating unique meeting IDs
 
 function scheduleReminder(meetingId) {
     // meeting = {
-    //      date,
-    //      time,
+    //      meetingDate,    // A date Object storing the date and time of the meeting
     //      details,
     //      comment,
-    //      meetingDate,    // Formatted date
-    //      meetingType,    // Server, Group DM, DM
-    //      receiverID      // ServerID, group DM ID, User ID; depending on the meetingType
+    //      guildId,        // (guildId != null) If message came from server, null if came from DM or Group DM
+    //      channelId       // ChannelID field of the interaction or message
     //  }
-    const now = new Date();
-    let meeting = meetings[meetingId];
+    const now = Date.now(); // Use a timestamp for consistency
+    let meeting = meetings[meetingId]; // Ensure this is defined and valid
 
     const reminderTimes = [
-        meeting.meetingDate - 30 * 60 * 1000,   // 30 minutes before, still doesn't work
-        meeting.meetingDate,                    // At time of reminder
+        meeting.meetingDate.getTime() - 30 * 60 * 1000, // 30 minutes before
+        meeting.meetingDate.getTime()                   // At the time of the meeting
     ];
 
     reminderTimes.forEach((reminderTime) => {
         if (reminderTime > now) {
             const delay = reminderTime - now;
-            setTimeout(() => sendReminder(meetingId, meeting), delay);
+            console.log(`Scheduling reminder for ${new Date(reminderTime).toString()}`);
+            // setTimeout(() => sendReminder(meetingId, meeting), delay);
         }
     });
 }
 
 function sendReminder(meetingId) {
-    // meeting = {
-    //      date,
-    //      time,
-    //      details,
-    //      comment,
-    //      meetingDate,    // Formatted date
-    //      meetingType,    // Server, Group DM, DM
-    //      receiverID      // ServerID, group DM ID, User ID; depending on the meetingType
-    //  }
-    let meeting = meetings[meetingId];
+    const meeting = meetings[meetingId];
+
+    if (!meeting) {
+        console.error(`Meeting with ID ${meetingId} not found.`);
+        return;
+    }
+
+    const { meetingDate, details, comment, guildId, channelId } = meeting;
+
+    const formattedDate = meetingDate.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
+    const formattedTime = meetingDate.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    });
+
     const embed = new EmbedBuilder()
         .setAuthor({ name: 'Shellmates Reminder App' })
         .setTitle('🔔 Meeting Reminder')
-        .setDescription(`You have a meeting scheduled on **${meeting.date}** at **${meeting.time}**. Details: **${meeting.details}**. Comment: **${meeting.comment}**.`)
+        .setDescription(
+            `You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.\n\n**Details:** ${details}\n**Comment:** ${comment}`
+        )
         .setTimestamp()
         .setFooter({ text: 'Reminder system' });
 
-    switch (meeting.meetingType) {
-        case 1:
-            client.guilds.fetch(meeting.receiverID).then((guild) => {
-                guild.members.fetch().then((members) =>
-                    members.forEach((member) =>
-                        member.send({ embeds: [embed] })
-                            .catch((err) => console.error(`Could not send to ${member.user.tag}: ${err}`))
-                    )
-                )
-            }).catch((err) => console.error(`Could not fetch guild: ${err}`));
-            break;
+    const channel = client.channels.cache.get(channelId);
+    console.log('channel: ' + channel.id)
+    client.channels.fetch(channelId).then((channel) => {
+        channel.send({ embeds: [embed] }).catch((error) => {
+            console.error(`Failed to send reminder to channel ${channelId}:`, error);
+        });
+    })
 
-        case 2:
-            client.channels.fetch(meeting.receiverID).then((channel) => {
-                channel.send({ embeds: [embed] })
-                    .catch((err) => console.error(`Could not send to the channel: ${err}`));
-            }).catch((err) => console.error(`Could not fetch channel: ${err}`));
-            break;
-
-        case 3:
-            client.users.fetch(meeting.receiverID).then((user) => {
-                user.send({ embeds: [embed] })
-                    .catch((err) => console.error(`Could not send to ${user.tag}: ${err}`));
-            }).catch((err) => console.error(`Could not fetch user: ${err}`));
-            break;
-
-        default:
-            console.error("Invalid meetingType field in object: ")
-            console.error(meeting);
-
-            break;
+    if (channel) {
+        channel.send({ embeds: [embed] }).catch((error) => {
+            console.error(`Failed to send reminder to channel ${channelId}:`, error);
+        });
     }
-
-    if (!deleteMeeting(meetingId))
-        console.error(`Couldn't delete meeting of ID ${meetingId}`)
+    // else if (!guildId) {
+    //     // If no guildId, send a DM to the user (optional)
+    //     const user = client.users.cache.get(channelId); // channelId serves as userId for DMs
+    //     if (user) {
+    //         user.send({ embeds: [embed] }).catch((error) => {
+    //             console.error(`Failed to send DM to user ${channelId}:`, error);
+    //         });
+    //     }
+    //     else {
+    //         console.error(`User with ID ${channelId} not found.`);
+    //     }
+    // }
+    else {
+        console.error(`Channel with ID ${channelId} not found.`);
+    }
 }
+// function sendReminder(meetingId) {
+//     // meeting = {
+//     //      meetingDate,    // A date Object storing the date and time of the meeting
+//     //      details,
+//     //      comment,
+//     //      guildId,        // (guildId != null) If message came from server, null if came from DM or Group DM
+//     //      channelId       // ChannelID field of the interaction or message
+//     //  }
+//     let meeting = meetings[meetingId];
+//     const embed = new EmbedBuilder()
+//         .setAuthor({ name: 'Shellmates Reminder App' })
+//         .setTitle('🔔 Meeting Reminder')
+//         .setDescription(`You have a meeting scheduled on **${meeting.date}** at **${meeting.time}**. Details: **${meeting.details}**. Comment: **${meeting.comment}**.`)
+//         .setTimestamp()
+//         .setFooter({ text: 'Reminder system' });
+//
+//     switch (meeting.meetingType) {
+//         case 1:
+//             client.guilds.fetch(meeting.receiverID).then((guild) => {
+//                 guild.members.fetch().then((members) =>
+//                     members.forEach((member) =>
+//                         member.send({ embeds: [embed] })
+//                             .catch((err) => console.error(`Could not send to ${member.user.tag}: ${err}`))
+//                     )
+//                 )
+//             }).catch((err) => console.error(`Could not fetch guild: ${err}`));
+//             break;
+//
+//         case 2:
+//             client.channels.fetch(meeting.receiverID).then((channel) => {
+//                 channel.send({ embeds: [embed] })
+//                     .catch((err) => console.error(`Could not send to the channel: ${err}`));
+//             }).catch((err) => console.error(`Could not fetch channel: ${err}`));
+//             break;
+//
+//         default:
+//             console.error("Invalid meetingType field in object: ")
+//             console.error(meeting);
+//
+//             break;
+//     }
+//
+//     // if (!deleteMeeting(meetingId))
+//     //     console.error(`Couldn't delete meeting of ID ${meetingId}`)
+// }
 
 function deleteMeeting(meetingID) {
     if (!meetings[meetingID])
@@ -356,25 +405,11 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply('❌ You cannot schedule a meeting in the past.');
         }
 
-        let meetingType = null
-        let receiverID = null
-        console.log
-        if (interaction.guild) {
-            meetingType = 1
-            receiverID = interaction.guild.id
-        }
-        else if (interaction.channel.type === 'GROUP_DM') {
-            meetingType = 2
-            receiverID = interaction.channel.id
-        }
-        else {
-            // Suppose it is a DM then
-            meetingType = 3
-            receiverID = interaction.author.id
-        }
+        let guildId = interaction.guildId // null if message came from DM or group DM
+        let channelId= interaction.channelId
 
         const meetingId = crypto.randomBytes(16).toString('hex');
-        meetings[meetingId] = { date, time, details, comment, meetingType, receiverID };
+        meetings[meetingId] = { meetingDate, details, comment, guildId, channelId };
         scheduleReminder(meetingId)
 
         await interaction.reply(`✅ Meeting scheduled for **${date}** at **${time}** with details: **${details}**. Comment: **${comment}**. Meeting ID: **${meetingId}**`);

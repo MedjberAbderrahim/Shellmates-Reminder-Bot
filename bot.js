@@ -6,27 +6,28 @@ function scheduleReminder(meetingId) {
     //      meetingDate,    // A date Object storing the date and time of the meeting
     //      details,
     //      comment,
-    //      guildId,        // (guildId != null) If message came from server, null if came from DM or Group DM
-    //      channelId       // ChannelID field of the interaction or message
+    //      tags,           // Roles or Users to be tagged
+    //      channelId       // ChannelID field of the interaction or message, Globally unique
     //  }
-    const now = Date.now(); // Use a timestamp for consistency
+    const nowDate = new Date();
+    const now = nowDate.getTime() // Use a timestamp for consistency
     let meeting = meetings[meetingId]; // Ensure this is defined and valid
 
     const reminderTimes = [
-        meeting.meetingDate.getTime() - 30 * 60 * 1000, // 30 minutes before
-        meeting.meetingDate.getTime()                   // At the time of the meeting
+        [meeting.meetingDate.getTime() - 30 * 60 * 1000, false], // 30 minutes before
+        [meeting.meetingDate.getTime(), true]                   // At the time of the meeting
     ];
 
     reminderTimes.forEach((reminderTime) => {
-        if (reminderTime > now) {
-            const delay = reminderTime - now;
-            console.log(`Scheduling reminder for ${new Date(reminderTime).toString()}`);
-            // setTimeout(() => sendReminder(meetingId, meeting), delay);
+        if (reminderTime[0] > now) {
+            const delay = reminderTime[0] - now;
+            console.log(`Scheduling reminder for ${new Date(reminderTime[0]).toString()}`);
+            setTimeout(() => sendReminder(meetingId, reminderTime[1]), delay);
         }
     });
 }
 
-function sendReminder(meetingId) {
+function sendReminder(meetingId, lastReminder) {
     const meeting = meetings[meetingId];
 
     if (!meeting) {
@@ -34,7 +35,7 @@ function sendReminder(meetingId) {
         return;
     }
 
-    const { meetingDate, details, comment, guildId, channelId } = meeting;
+    const { meetingDate, details, comment, resolvedMentions, channelId} = meeting;
 
     const formattedDate = meetingDate.toLocaleDateString('en-US', {
         year: 'numeric',
@@ -47,89 +48,29 @@ function sendReminder(meetingId) {
         hour12: true,
     });
 
-    const embed = new EmbedBuilder()
-        .setAuthor({ name: 'Shellmates Reminder App' })
-        .setTitle('🔔 Meeting Reminder')
-        .setDescription(
-            `You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.\n\n**Details:** ${details}\n**Comment:** ${comment}`
-        )
-        .setTimestamp()
-        .setFooter({ text: 'Reminder system' });
+    const messageContent = `
+🔔 **Meeting Reminder** 🔔
 
-    const channel = client.channels.cache.get(channelId);
-    console.log('channel: ' + channel.id)
+${resolvedMentions?.join(' ')}
+You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.
+
+**Details:** ${details}
+**Comment:** ${comment}
+
+*Reminder system*
+`;
+
     client.channels.fetch(channelId).then((channel) => {
-        channel.send({ embeds: [embed] }).catch((error) => {
+        channel.send(messageContent).catch((error) => {
             console.error(`Failed to send reminder to channel ${channelId}:`, error);
         });
-    })
+    });
 
-    if (channel) {
-        channel.send({ embeds: [embed] }).catch((error) => {
-            console.error(`Failed to send reminder to channel ${channelId}:`, error);
-        });
-    }
-    // else if (!guildId) {
-    //     // If no guildId, send a DM to the user (optional)
-    //     const user = client.users.cache.get(channelId); // channelId serves as userId for DMs
-    //     if (user) {
-    //         user.send({ embeds: [embed] }).catch((error) => {
-    //             console.error(`Failed to send DM to user ${channelId}:`, error);
-    //         });
-    //     }
-    //     else {
-    //         console.error(`User with ID ${channelId} not found.`);
-    //     }
-    // }
-    else {
-        console.error(`Channel with ID ${channelId} not found.`);
-    }
+    // Do not group those 2 conditions, because we need to know when deletion of a meeting failed
+    if (lastReminder)
+        if (!deleteMeeting(meetingId))
+            console.error(`Failed to delete meeting with ID ${meetingId}`);
 }
-// function sendReminder(meetingId) {
-//     // meeting = {
-//     //      meetingDate,    // A date Object storing the date and time of the meeting
-//     //      details,
-//     //      comment,
-//     //      guildId,        // (guildId != null) If message came from server, null if came from DM or Group DM
-//     //      channelId       // ChannelID field of the interaction or message
-//     //  }
-//     let meeting = meetings[meetingId];
-//     const embed = new EmbedBuilder()
-//         .setAuthor({ name: 'Shellmates Reminder App' })
-//         .setTitle('🔔 Meeting Reminder')
-//         .setDescription(`You have a meeting scheduled on **${meeting.date}** at **${meeting.time}**. Details: **${meeting.details}**. Comment: **${meeting.comment}**.`)
-//         .setTimestamp()
-//         .setFooter({ text: 'Reminder system' });
-//
-//     switch (meeting.meetingType) {
-//         case 1:
-//             client.guilds.fetch(meeting.receiverID).then((guild) => {
-//                 guild.members.fetch().then((members) =>
-//                     members.forEach((member) =>
-//                         member.send({ embeds: [embed] })
-//                             .catch((err) => console.error(`Could not send to ${member.user.tag}: ${err}`))
-//                     )
-//                 )
-//             }).catch((err) => console.error(`Could not fetch guild: ${err}`));
-//             break;
-//
-//         case 2:
-//             client.channels.fetch(meeting.receiverID).then((channel) => {
-//                 channel.send({ embeds: [embed] })
-//                     .catch((err) => console.error(`Could not send to the channel: ${err}`));
-//             }).catch((err) => console.error(`Could not fetch channel: ${err}`));
-//             break;
-//
-//         default:
-//             console.error("Invalid meetingType field in object: ")
-//             console.error(meeting);
-//
-//             break;
-//     }
-//
-//     // if (!deleteMeeting(meetingId))
-//     //     console.error(`Couldn't delete meeting of ID ${meetingId}`)
-// }
 
 function deleteMeeting(meetingID) {
     if (!meetings[meetingID])
@@ -137,6 +78,37 @@ function deleteMeeting(meetingID) {
 
     delete meetings[meetingID];
     return true;
+}
+
+async function resolveMentions(guild, mention) {
+    if (mention === '@everyone' || mention === '@here') {
+        // Handle special mentions directly
+        return mention
+    }
+    else if (mention.startsWith('<@') && mention.endsWith('>')) {
+        // Handle user mentions (already formatted as <@userID>)
+        return mention
+    }
+    else if (mention.startsWith('<@&') && mention.endsWith('>')) {
+        // Handle role mentions (formatted as <@&roleID>)
+        const roleId = mention.match(/\d+/)[0];
+        const role = guild.roles.cache.get(roleId);
+        if (role)
+            return `@${role.name}`// Add role name without tagging
+    }
+    else if (mention.startsWith('@')) {
+        // Plain text mentions (could be usernames or roles)
+        const roleName = mention.slice(1); // Remove '@'
+        const role = guild.roles.cache.find((r) => r.name === roleName);
+        if (role)
+            return `@${role.name}`;  // Add role name without tagging
+        else {
+            const member = await guild.members.fetch({query: roleName, limit: 1}).then(members => members.first());
+            if (member)
+                return `<@${member.id}>`
+        }
+    }
+    return null
 }
 
 const client = new Client({
@@ -181,10 +153,23 @@ client.once('ready', () => {
                 option.setName('comment')
                     .setDescription('Comment about the meeting')
                     .setRequired(true)
+            )
+            .addStringOption(option =>
+                option.setName('tags')
+                    .setDescription('Roles and Users to be tagged')
+                    .setRequired(true)
             ),
         new SlashCommandBuilder()
             .setName('meetings')
-            .setDescription('Show all scheduled meetings'),
+            .setDescription('Show all scheduled meetings.'),
+        new SlashCommandBuilder()
+            .setName('remind')
+            .setDescription('Manually send a reminder for an existing meeting.')
+            .addStringOption(option =>
+                option.setName('id')
+                    .setDescription('ID of the meeting to send a notification')
+                    .setRequired(true)
+            ),
         new SlashCommandBuilder()
             .setName('removemeeting')
             .setDescription('Remove a scheduled meeting by its ID')
@@ -303,13 +288,9 @@ client.on('messageCreate', async (message) => {
             break;
 
         case 'meetings':
-            console.log('message = ');
-            console.log(message)
-
             if (Object.keys(meetings).length === 0) {
                 return message.reply('There are no meetings currently scheduled.');
             }
-
 
             let msg1 = '📅 Upcoming Meetings:\n';
             let displayedMeetings = ""
@@ -392,6 +373,23 @@ client.on('interactionCreate', async (interaction) => {
         const details = options.getString('details');
         const comment = options.getString('comment');
 
+        const tagsInput = options.getString('tags');
+        const mentions = tagsInput.match(/<@!?(\d+)>|@\w+/g); // Matches Discord user mentions or plain usernames
+        const resolvedMentions = [];
+        const guild = interaction.guild; // Ensure the command is from a server
+
+        if (guild && mentions)
+            for (const mention of mentions)
+                try {
+                    const resolvedMention = await resolveMentions(guild, mention);
+                    if (resolvedMention)
+                        resolvedMentions.push(resolvedMention);
+                }
+                catch (error) {
+                    console.error(`Failed to resolve mention: ${mention}`, error);
+                }
+
+        // CREATE /REMIND meetingID COMMAND
         const formattedDate = date.replace(/[^0-9]/g, '-');
         const [day, month, year] = formattedDate.split('-');
         const meetingDate = new Date(`${year}-${month}-${day}T${time}:00`);
@@ -405,57 +403,69 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply('❌ You cannot schedule a meeting in the past.');
         }
 
-        let guildId = interaction.guildId // null if message came from DM or group DM
         let channelId= interaction.channelId
 
         const meetingId = crypto.randomBytes(16).toString('hex');
-        meetings[meetingId] = { meetingDate, details, comment, guildId, channelId };
+        meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
         scheduleReminder(meetingId)
 
-        await interaction.reply(`✅ Meeting scheduled for **${date}** at **${time}** with details: **${details}**. Comment: **${comment}**. Meeting ID: **${meetingId}**`);
+        await interaction.reply(`${resolvedMentions?.join(' ')}\n✅ Meeting scheduled for **${date}** at **${time}** with details: **${details}**. Comment: **${comment}**. Meeting ID: **${meetingId}**`);
     }
 
+    if (commandName === 'remind') {
+        const meetingID = options.getString('id');
+        if (!meetings[meetingID]) {
+            return interaction.reply('❌ No meeting found with that ID.');
+        }
+        sendReminder(meetingID, false)
+        return;
+    }
     // Handle /meetings (slash command)
     if (commandName === 'meetings') {
-        console.log('interaction = ');
-        console.log(interaction)
-
-        if (Object.keys(meetings).length === 0) {
-            return interaction.reply('There are no meetings currently scheduled.');
+        if (!Object.keys(meetings).length) {
+            await interaction.reply('There are no meetings currently scheduled.');
+            return;
         }
 
+        let msg1 = '📅 **Upcoming Meetings**:\n';
+        let displayedMeetings = "";
+        let guild = interaction.guild;
 
-        let msg1 = '📅 Upcoming Meetings:\n';
-        let displayedMeetings = ""
+        const meetingPromises = Object.keys(meetings).map(async (meetingId) => {
+            const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
+            if (channelId === interaction.channelId) {
+                const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
+                    if (mention.startsWith('<@')) {
+                        // For user mentions (e.g., <@userID>)
+                        const user = await guild.members.fetch(mention.slice(2, -1));
+                        return `@${user.user.username}`; // Display the username with @
+                    }
+                    else if (mention.startsWith('<@&')) {
+                        // For role mentions (e.g., <@&roleID>)
+                        const roleId = mention.slice(3, -1); // Removes <@& and >
+                        const role = await guild.roles.fetch(roleId);
+                        return `@${role.name}`; // Display the role name with @
+                    }
+                    return mention; // If it's already a plain text mention, return as is
+                }));
 
-        if (interaction.guild) {    // Server interaction
-            Object.keys(meetings).forEach((meetingId) => {
-                const meeting = meetings[meetingId];
-                if(meeting.meetingType === 1 && meeting.receiverID === interaction.guild.id)
-                    displayedMeetings += `**ID**: ${meetingId} | **Date**: ${meeting.date} | **Time**: ${meeting.time} | **Details**: ${meeting.details} | **Comment**: ${meeting.comment}\n`;
-            });
-        }
-        else if (interaction.channel.type === 'GROUP_DM') { // Group DM interaction
-            Object.keys(meetings).forEach((meetingId) => {
-                const meeting = meetings[meetingId];
-                if(meeting.meetingType === 2 && meeting.receiverID === interaction.channel.id)
-                    displayedMeetings += `**ID**: ${meetingId} | **Date**: ${meeting.date} | **Time**: ${meeting.time} | **Details**: ${meeting.details} | **Comment**: ${meeting.comment}\n`;
-            });
-        }
-        else {
-            // Suppose it is a DM then
-            Object.keys(meetings).forEach((meetingId) => {
-                const meeting = meetings[meetingId];
-                if(meeting.meetingType === 3 && meeting.receiverID === interaction.author.id)
-                    displayedMeetings += `**ID**: ${meetingId} | **Date**: ${meeting.date} | **Time**: ${meeting.time} | **Details**: ${meeting.details} | **Comment**: ${meeting.comment}\n`;
-            });
-        }
+                // Format the meeting details more clearly
+                displayedMeetings += `\n**Meeting ID**: ${meetingId}\n`;
+                displayedMeetings += `**Date**: ${meetingDate}\n`;
+                displayedMeetings += `**Details**: ${details}\n`;
+                displayedMeetings += `**Comment**: ${comment}\n`;
+                displayedMeetings += `**Targets**: ${targets.length > 0 ? targets.join(', ') : 'No Targets'}\n`;
+                displayedMeetings += `-----------------------------\n`; // A separator line for each meeting
+            }
+        });
+        await Promise.all(meetingPromises); // Wait for all promises to resolve before sending the response
 
         if (displayedMeetings === "")
-            return interaction.reply('There are no meetings currently scheduled.');
+            await interaction.reply('There are no meetings currently scheduled.');
         else
-            interaction.reply(msg1 + displayedMeetings);
+            await interaction.reply(msg1 + displayedMeetings);
     }
+
 
     // Handle /removemeeting (slash command)
     if (commandName === 'removemeeting') {
@@ -500,7 +510,8 @@ client.on('interactionCreate', async (interaction) => {
                 { name: '/meetings', value: 'View all scheduled meetings.' },
                 { name: '/removemeeting', value: 'Remove a scheduled meeting by its ID.' },
                 { name: '/selectrole', value: 'Set the role that can manage meetings.' },
-                { name: '/removerole', value: 'Remove the selected admin role.' }
+                { name: '/removerole', value: 'Remove the selected admin role.' },
+                { name: '/remind', value: 'Manually send a reminder for an existing meeting.' },
             )
             .setTimestamp()
             .setFooter({ text: 'Created by Shellmates' });

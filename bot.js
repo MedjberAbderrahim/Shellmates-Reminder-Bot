@@ -15,7 +15,7 @@ function scheduleReminder(meetingId) {
     let meeting = meetings[meetingId];
 
     const reminderTimes = [
-        // meeting.meetingDate - 30 * 60 * 1000,   // 30 minutes before, still doesn't work
+        meeting.meetingDate - 30 * 60 * 1000,   // 30 minutes before, still doesn't work
         meeting.meetingDate,                    // At time of reminder
     ];
 
@@ -74,7 +74,7 @@ function sendReminder(meetingId) {
         default:
             console.error("Invalid meetingType field in object: ")
             console.error(meeting);
-            
+
             break;
     }
 
@@ -108,7 +108,7 @@ let meetings = {}; // To store meetings
 
 client.once('ready', () => {
     console.log(`${client.user.tag} is ready to work!`);
-    
+
     const commands = [
         new SlashCommandBuilder()
             .setName('addmeeting')
@@ -254,9 +254,13 @@ client.on('messageCreate', async (message) => {
             break;
 
         case 'meetings':
+            console.log('message = ');
+            console.log(message)
+
             if (Object.keys(meetings).length === 0) {
                 return message.reply('There are no meetings currently scheduled.');
             }
+
 
             let msg1 = '📅 Upcoming Meetings:\n';
             let displayedMeetings = ""
@@ -284,7 +288,7 @@ client.on('messageCreate', async (message) => {
                 });
             }
 
-            if (displayedMeetings === "") 
+            if (displayedMeetings === "")
                 return message.reply('There are no meetings currently scheduled.');
             else
                 message.reply(msg1 + displayedMeetings);
@@ -301,18 +305,18 @@ client.on('messageCreate', async (message) => {
             break;
         case 'help':
             const helpEmbed = new EmbedBuilder()
-            .setColor(0x0099ff)
-            .setTitle('Shellmates Meeting Bot - Help')
-            .setDescription('Here are the commands you can use:')
-            .addFields(
-                { name: '!addmeeting', value: 'Schedule a new meeting.' },
-                { name: '!meetings', value: 'View all scheduled meetings.' },
-                { name: '!removemeeting', value: 'Remove a scheduled meeting by its ID.' },
-                { name: '!selectrole', value: 'Set the role that can manage meetings.' },
-                { name: '!removerole', value: 'Remove the selected admin role.' }
-            )
-            .setTimestamp()
-            .setFooter({ text: 'Created by Shellmates' });
+                .setColor(0x0099ff)
+                .setTitle('Shellmates Meeting Bot - Help')
+                .setDescription('Here are the commands you can use:')
+                .addFields(
+                    { name: '!addmeeting', value: 'Schedule a new meeting.' },
+                    { name: '!meetings', value: 'View all scheduled meetings.' },
+                    { name: '!removemeeting', value: 'Remove a scheduled meeting by its ID.' },
+                    { name: '!selectrole', value: 'Set the role that can manage meetings.' },
+                    { name: '!removerole', value: 'Remove the selected admin role.' }
+                )
+                .setTimestamp()
+                .setFooter({ text: 'Created by Shellmates' });
 
             message.reply({ embeds: [helpEmbed] });
             break;
@@ -378,9 +382,13 @@ client.on('interactionCreate', async (interaction) => {
 
     // Handle /meetings (slash command)
     if (commandName === 'meetings') {
+        console.log('interaction = ');
+        console.log(interaction)
+
         if (Object.keys(meetings).length === 0) {
             return interaction.reply('There are no meetings currently scheduled.');
         }
+
 
         let msg1 = '📅 Upcoming Meetings:\n';
         let displayedMeetings = ""
@@ -408,7 +416,7 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        if (displayedMeetings === "") 
+        if (displayedMeetings === "")
             return interaction.reply('There are no meetings currently scheduled.');
         else
             interaction.reply(msg1 + displayedMeetings);

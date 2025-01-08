@@ -48,18 +48,20 @@ function sendReminder(meetingId, lastReminder) {
         hour12: true,
     });
 
-    const messageContent = `
+    let messageContent = `
 🔔 **Meeting Reminder** 🔔
 
-${resolvedMentions?.join(' ')}
+${resolvedMentions?.join(' ') || ''}
 You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.
 
 **Details:** ${details}
-**Comment:** ${comment}
-
-*Reminder system*
 `;
 
+    // Add optional fields only if they exist
+    if (comment)
+        messageContent += `**Comment:** ${comment}\n`;
+
+    messageContent += `\n*Reminder system*`;
     client.channels.fetch(channelId).then((channel) => {
         channel.send(messageContent).catch((error) => {
             console.error(`Failed to send reminder to channel ${channelId}:`, error);
@@ -80,33 +82,78 @@ function deleteMeeting(meetingID) {
     return true;
 }
 
-async function resolveMentions(guild, mention) {
-    if (mention === '@everyone' || mention === '@here') {
-        // Handle special mentions directly
-        return mention
+function parseArgs(input) {
+    const regex = /(?:[^\s"]+|"([^"]*)")+/g; // Regex to match unquoted and quoted arguments
+    return input.match(regex).map(arg => arg.replace(/^"|"$/g, '')); // Remove quotes if present
+}
+
+async function resolveMentions(mention, guild, author) {
+    if (mention === '@everyone' || mention === '@here')
+        return mention;
+
+    // Handle user mentions (formatted as <@userID>)
+    else if (mention.startsWith('<@') && mention.endsWith('>') && !mention.startsWith('<@&')) {
+        const userId = mention.slice(2, -1); // Extract userID
+
+        // Check if it's a DM (no guild available)
+        if (!guild) {
+            if (userId === author.id) // Mention is the author
+                return `<@${author.id}>`;
+            if (userId === client.user.id) // If the bot itself
+                return `<@${client.user.id}>`;
+
+            // return mention; // Return as is for unknown cases
+            console.error(`Unresolved mention0: ${mention}`)
+            return null;
+        }
+
+        // Handle guild-based resolution
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (member)
+            return `<@${member.user.id}>`; // Mention resolved to username
+
+        console.error(`Unresolved mention1: ${mention}`)
+        return null;
     }
-    else if (mention.startsWith('<@') && mention.endsWith('>')) {
-        // Handle user mentions (already formatted as <@userID>)
-        return mention
-    }
+
+    // Handle role mentions (formatted as <@&roleID>)
     else if (mention.startsWith('<@&') && mention.endsWith('>')) {
-        // Handle role mentions (formatted as <@&roleID>)
         const roleId = mention.match(/\d+/)[0];
         const role = guild.roles.cache.get(roleId);
+
         if (role)
-            return `@${role.name}`// Add role name without tagging
+            return `<@&${role.id}>`
     }
-    else if (mention.startsWith('@')) {
-        // Plain text mentions (could be usernames or roles)
-        const roleName = mention.slice(1); // Remove '@'
-        const role = guild.roles.cache.find((r) => r.name === roleName);
-        if (role)
-            return `@${role.name}`;  // Add role name without tagging
-        else {
-            const member = await guild.members.fetch({query: roleName, limit: 1}).then(members => members.first());
-            if (member)
-                return `<@${member.id}>`
+
+    else if (mention.startsWith('@')) { // Plain text mentions (could be usernames or roles)
+        const mentionString = mention.slice(1); // Remove '@'
+
+        // If there is no guild (DM), resolving mentions ends here
+        if (!guild) {
+            if (mentionString === author.username)         // Mention resolved to the author
+                return `@${author.username}`;
+            if (mentionString === client.user.username)    // Mention resolved to the bot
+                return `@${guild.client.user.username}`;
+            // return mention; // Return as-is for unknown cases in DMs
+
+            console.error(`Unresolved mention2: ${mention}`)
+            return null;
         }
+
+        // In a guild, check for roles first
+        const role = guild.roles.cache.find((r) => r.name === mentionString);
+        if (role)
+            return `@${role.name}`; // Resolve to role name without tagging
+
+        // Then check for members with matching usernames
+        const member = await guild.members
+            .fetch({ query: mentionString, limit: 1 })
+            .then((members) => members.first())
+            .catch(() => null);
+        if (member)
+            return `<@${member.id}>`; // Resolve to user mention
+
+        console.error(`Unresolved mention3: ${mention}`)
     }
     return null
 }
@@ -135,6 +182,11 @@ client.once('ready', () => {
             .setName('addmeeting')
             .setDescription('Schedule a new meeting')
             .addStringOption(option =>
+                option.setName('details')
+                    .setDescription('Details of the meeting')
+                    .setRequired(true)
+            )
+            .addStringOption(option =>
                 option.setName('date')
                     .setDescription('The date for the meeting (DD-MM-YYYY or DD/MM/YYYY)')
                     .setRequired(true)
@@ -145,19 +197,14 @@ client.once('ready', () => {
                     .setRequired(true)
             )
             .addStringOption(option =>
-                option.setName('details')
-                    .setDescription('Details of the meeting')
-                    .setRequired(true)
-            )
-            .addStringOption(option =>
                 option.setName('comment')
                     .setDescription('Comment about the meeting')
-                    .setRequired(true)
+                    .setRequired(false)
             )
             .addStringOption(option =>
                 option.setName('tags')
                     .setDescription('Roles and Users to be tagged')
-                    .setRequired(true)
+                    .setRequired(false)
             ),
         new SlashCommandBuilder()
             .setName('meetings')
@@ -201,9 +248,8 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return; // Don't reply to bot messages
 
-    if (!message.content.startsWith(PREFIX)) {
+    if (!message.content.startsWith(PREFIX))
         return
-    }
 
     // Handle prefix commands
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
@@ -215,113 +261,127 @@ client.on('messageCreate', async (message) => {
             //     return message.reply('❌ You do not have permission to schedule meetings.');
             // }
 
-            const date = args[0];
-            const time = args[1];
-            const details = args.slice(2, args.length - 1).join(' '); // Meeting details
-            const comment = args[args.length - 1]; // Comment
+            let arguments = parseArgs(args.join(' '))
 
-            // Validate date, time, details, and comment
-            if (!date || !time || !details || !comment) {
+            const details = arguments[0]; // Meeting details
+            const date = arguments[1];
+            const time = arguments[2];
+            const comment = arguments[3]; // Comment
+            const tags = arguments[4];
+
+            // Verify existence of required fields (details, date and time)
+            if (!details || !date || !time)
                 return message.reply('❌ Please provide a valid date, time, details, and comment.');
-            }
 
-            const formattedDate = date.replace(/[^0-9]/g, '-'); // Format date
-            const [day, month, year] = formattedDate.split('-');
+            // Date treatment and filtering
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(date))
+                return message.reply('❌ Invalid date format. Please use yyyy-mm-dd.');
+
+            const [year, month, day] = date.split('-');
             const meetingDate = new Date(`${year}-${month}-${day}T${time}:00`);
 
-            if (isNaN(meetingDate)) {
+            if (isNaN(meetingDate))
                 return message.reply('❌ Invalid date or time format.');
-            }
 
             const now = new Date();
-            if (meetingDate <= now) {
+            if (meetingDate <= now)
                 return message.reply('❌ You cannot schedule a meeting in the past.');
+
+            const resolvedMentions = [];
+            if (tags) {
+                const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g); // Matches Discord user mentions or plain usernames
+
+                if (mentions)
+                    for (const mention of mentions)
+                        try {
+                            const resolvedMention = await resolveMentions(mention, message.guild, message.author);
+                            if (resolvedMention)
+                                resolvedMentions.push(resolvedMention);
+                        }
+                        catch (error) {
+                            console.error(`Failed to resolve mention: ${mention}`, error);
+                        }
             }
 
-            let meetingType = null
-            let receiverID = null
-
-            if (message.guild) {
-                meetingType = 1
-                receiverID = message.guild.id
-            }
-            else if (message.channel.type === 'GROUP_DM') {
-                meetingType = 2
-                receiverID = message.channel.id
-            }
-            else {
-                // Suppose it is a DM then
-                meetingType = 3
-                receiverID = message.author.id
-            }
+            let channelId = message.channelId
 
             const meetingId = crypto.randomBytes(16).toString('hex');
-            meetings[meetingId] = { date, time, details, comment, meetingDate, meetingType, receiverID };
+            meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
             scheduleReminder(meetingId)
 
-            // Send confirmation message
-            message.reply(`✅ Meeting scheduled for **${date}** at **${time}** with details: **${details}**. Comment: **${comment}**. Meeting ID: **${meetingId}**`);
+            await message.reply(`${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\nComment: **${comment}**.`);
             break;
         }
 
         case 'removemeeting': {
             if (deleteMeeting(args[0]))
-                message.reply(`✅ Meeting with ID **${args[0]}** has been removed.`);
+                await message.reply(`✅ Meeting with ID **${args[0]}** has been removed.`);
             else
-                return message.reply(`❌ No meeting found with ID **${args[0]}**.`);
+                await message.reply(`❌ No meeting found with ID **${args[0]}**.`);
 
             break;
         }
 
         case 'selectrole':
-            if (message.author.id !== message.guild.ownerId) {
+            if (message.author.id !== message.guild.ownerId)
                 return message.reply('❌ Only the server owner can select the admin role.');
-            }
 
             const role = message.mentions.roles.first();
-            if (!role) {
+            if (!role)
                 return message.reply('❌ Please mention a role to select.');
-            }
 
             adminRoleId = role.id;
-            message.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
+            await message.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
             break;
 
         case 'meetings':
-            if (Object.keys(meetings).length === 0) {
+            if (!Object.keys(meetings).length)
                 return message.reply('There are no meetings currently scheduled.');
-            }
 
-            let msg1 = '📅 Upcoming Meetings:\n';
-            let displayedMeetings = ""
+            let msg1 = '📅 **Upcoming Meetings**:\n';
+            let displayedMeetings = "";
+            let guild = message.guild;
 
-            if (message.guild) {    // Server Message
-                Object.keys(meetings).forEach((meetingId) => {
-                    const meeting = meetings[meetingId];
-                    if(meeting.meetingType === 1 && meeting.receiverID === message.guild.id)
-                        displayedMeetings += `**ID**: ${meetingId} | **Date**: ${meeting.date} | **Time**: ${meeting.time} | **Details**: ${meeting.details} | **Comment**: ${meeting.comment}\n`;
-                });
-            }
-            else if (message.channel.type === 'GROUP_DM') { // Group DM Message
-                Object.keys(meetings).forEach((meetingId) => {
-                    const meeting = meetings[meetingId];
-                    if(meeting.meetingType === 2 && meeting.receiverID === message.channel.id)
-                        displayedMeetings += `**ID**: ${meetingId} | **Date**: ${meeting.date} | **Time**: ${meeting.time} | **Details**: ${meeting.details} | **Comment**: ${meeting.comment}\n`;
-                });
-            }
-            else {
-                // Suppose it is a DM then
-                Object.keys(meetings).forEach((meetingId) => {
-                    const meeting = meetings[meetingId];
-                    if(meeting.meetingType === 3 && meeting.receiverID === message.author.id)
-                        displayedMeetings += `**ID**: ${meetingId} | **Date**: ${meeting.date} | **Time**: ${meeting.time} | **Details**: ${meeting.details} | **Comment**: ${meeting.comment}\n`;
-                });
-            }
+            const meetingPromises = Object.keys(meetings).map(async (meetingId) => {
+                const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
+                if (channelId === message.channelId) {
+                    const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
+                        if (mention.startsWith('<@&')) {
+                            // For role mentions (e.g., <@&roleID>)
+                            const roleId = mention.slice(3, -1); // Removes <@& and >
+                            const role = await guild.roles.fetch(roleId);
+                            return `@${role.name}`; // Display the role name with @
+                        }
+                        else if (mention.startsWith('<@')) {
+                            // For user mentions (e.g., <@userID>)
+                            let id = mention.slice(2, -1);
+                            if (id === message.author.id)
+                                return `@${message.author.username}`;
+                            if (id === client.user.id)
+                                return `@${client.user.username}`;
+
+                            const user = await guild.members.fetch(id);
+                            return `@${user.user.username}`; // Display the username with @
+                        }
+                        return mention; // If it's already a plain text mention, return as is
+                    }));
+
+                    // Format the meeting details more clearly
+                    displayedMeetings += `\n**Meeting ID**: ${meetingId}\n`;
+                    displayedMeetings += `**Date**: ${meetingDate}\n`;
+                    displayedMeetings += `**Details**: ${details}\n`;
+                    displayedMeetings += `**Comment**: ${comment}\n`;
+                    displayedMeetings += `**Targets**: ${targets.length > 0 ? targets.join(', ') : 'No Targets'}\n`;
+                    displayedMeetings += `-----------------------------\n`; // A separator line for each meeting
+                }
+            });
+            await Promise.all(meetingPromises); // Wait for all promises to resolve before sending the response
 
             if (displayedMeetings === "")
-                return message.reply('There are no meetings currently scheduled.');
+                await message.reply('There are no meetings currently scheduled.');
             else
-                message.reply(msg1 + displayedMeetings);
+                await message.reply(msg1 + displayedMeetings);
 
             break;
 
@@ -331,7 +391,7 @@ client.on('messageCreate', async (message) => {
             }
 
             adminRoleId = null;
-            message.reply('✅ Admin role has been removed.');
+            await message.reply('✅ Admin role has been removed.');
             break;
         case 'help':
             const helpEmbed = new EmbedBuilder()
@@ -348,11 +408,11 @@ client.on('messageCreate', async (message) => {
                 .setTimestamp()
                 .setFooter({ text: 'Created by Shellmates' });
 
-            message.reply({ embeds: [helpEmbed] });
+            await message.reply({embeds: [helpEmbed]});
             break;
 
         default:
-            message.reply('Invalid Command!')
+            await message.reply('Invalid Command!')
             break;
     }
 });
@@ -364,43 +424,44 @@ client.on('interactionCreate', async (interaction) => {
 
     // Handle /addmeeting (slash command)
     if (commandName === 'addmeeting') {
-        // if (!interaction.member.roles.cache.has(adminRoleId)) {
+        // if (interaction.guild && !interaction.member.roles.cache.has(adminRoleId))
         //     return interaction.reply('❌ You do not have permission to schedule meetings.');
-        // }
 
+        const details = options.getString('details');
         const date = options.getString('date');
         const time = options.getString('time');
-        const details = options.getString('details');
         const comment = options.getString('comment');
+        const tags = options.getString('tags');
 
-        const tagsInput = options.getString('tags');
-        const mentions = tagsInput.match(/<@!?(\d+)>|@\w+/g); // Matches Discord user mentions or plain usernames
-        const resolvedMentions = [];
-        const guild = interaction.guild; // Ensure the command is from a server
+        // Date treatment and filtering
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date))
+            return interaction.reply('❌ Invalid date format. Please use yyyy-mm-dd.');
 
-        if (guild && mentions)
-            for (const mention of mentions)
-                try {
-                    const resolvedMention = await resolveMentions(guild, mention);
-                    if (resolvedMention)
-                        resolvedMentions.push(resolvedMention);
-                }
-                catch (error) {
-                    console.error(`Failed to resolve mention: ${mention}`, error);
-                }
-
-        // CREATE /REMIND meetingID COMMAND
-        const formattedDate = date.replace(/[^0-9]/g, '-');
-        const [day, month, year] = formattedDate.split('-');
+        const [year, month, day] = date.split('-');
         const meetingDate = new Date(`${year}-${month}-${day}T${time}:00`);
 
-        if (isNaN(meetingDate)) {
+        if (isNaN(meetingDate))
             return interaction.reply('❌ Invalid date or time format.');
-        }
 
         const now = new Date();
-        if (meetingDate <= now) {
+        if (meetingDate <= now)
             return interaction.reply('❌ You cannot schedule a meeting in the past.');
+
+        const resolvedMentions = [];
+        if (tags) {
+            const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
+
+            if (mentions)
+                for (const mention of mentions)
+                    try {
+                        const resolvedMention = await resolveMentions(mention, interaction.guild, interaction.user);
+                        if (resolvedMention)
+                            resolvedMentions.push(resolvedMention);
+                    }
+                    catch (error) {
+                        console.error(`Failed to resolve mention: ${mention}`, error);
+                    }
         }
 
         let channelId= interaction.channelId
@@ -409,23 +470,21 @@ client.on('interactionCreate', async (interaction) => {
         meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
         scheduleReminder(meetingId)
 
-        await interaction.reply(`${resolvedMentions?.join(' ')}\n✅ Meeting scheduled for **${date}** at **${time}** with details: **${details}**. Comment: **${comment}**. Meeting ID: **${meetingId}**`);
+        await interaction.reply(`${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\nComment: **${comment}**.`);
     }
 
     if (commandName === 'remind') {
         const meetingID = options.getString('id');
-        if (!meetings[meetingID]) {
+        if (!meetings[meetingID])
             return interaction.reply('❌ No meeting found with that ID.');
-        }
+
         sendReminder(meetingID, false)
         return;
     }
     // Handle /meetings (slash command)
     if (commandName === 'meetings') {
-        if (!Object.keys(meetings).length) {
-            await interaction.reply('There are no meetings currently scheduled.');
-            return;
-        }
+        if (!Object.keys(meetings).length)
+            return interaction.reply('There are no meetings currently scheduled.');
 
         let msg1 = '📅 **Upcoming Meetings**:\n';
         let displayedMeetings = "";
@@ -435,16 +494,22 @@ client.on('interactionCreate', async (interaction) => {
             const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
             if (channelId === interaction.channelId) {
                 const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
-                    if (mention.startsWith('<@')) {
-                        // For user mentions (e.g., <@userID>)
-                        const user = await guild.members.fetch(mention.slice(2, -1));
-                        return `@${user.user.username}`; // Display the username with @
-                    }
-                    else if (mention.startsWith('<@&')) {
+                    if (mention.startsWith('<@&')) {
                         // For role mentions (e.g., <@&roleID>)
                         const roleId = mention.slice(3, -1); // Removes <@& and >
                         const role = await guild.roles.fetch(roleId);
                         return `@${role.name}`; // Display the role name with @
+                    }
+                    else if (mention.startsWith('<@')) {
+                        // For user mentions (e.g., <@userID>)
+                        let id = mention.slice(2, -1);
+                        if (id === interaction.user.id)
+                            return `@${interaction.user.username}`;
+                        if (id === client.user.id)
+                            return `@${client.user.username}`;
+
+                        const user = await guild.members.fetch(id);
+                        return `@${user.user.username}`; // Display the username with @
                     }
                     return mention; // If it's already a plain text mention, return as is
                 }));
@@ -465,7 +530,6 @@ client.on('interactionCreate', async (interaction) => {
         else
             await interaction.reply(msg1 + displayedMeetings);
     }
-
 
     // Handle /removemeeting (slash command)
     if (commandName === 'removemeeting') {
@@ -491,9 +555,8 @@ client.on('interactionCreate', async (interaction) => {
 
     // Handle /removerole (slash command)
     if (commandName === 'removerole') {
-        if (user.id !== interaction.guild.ownerId) {
+        if (user.id !== interaction.guild.ownerId)
             return interaction.reply('❌ Only the server owner can remove the admin role.');
-        }
 
         adminRoleId = null;
         await interaction.reply('✅ Admin role has been removed.');

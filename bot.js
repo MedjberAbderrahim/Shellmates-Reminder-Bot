@@ -310,7 +310,12 @@ client.on('messageCreate', async (message) => {
             meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
             scheduleReminder(meetingId)
 
-            await message.reply(`${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\nComment: **${comment}**.`);
+            let replyMessage = `${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\n`
+            if (comment)
+                replyMessage += `**Comment:** ${comment}\n`;
+
+            await message.reply(replyMessage);
+
             break;
         }
 
@@ -470,7 +475,11 @@ client.on('interactionCreate', async (interaction) => {
         meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
         scheduleReminder(meetingId)
 
-        await interaction.reply(`${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\nComment: **${comment}**.`);
+        let replyMessage = `${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\n`
+        if (comment)
+            replyMessage += `**Comment:** ${comment}\n`;
+
+        await interaction.reply(replyMessage);
     }
 
     if (commandName === 'remind') {

@@ -13,3 +13,5 @@ Thumbs.db
 
 # Lock file (optional, include if you want version consistency)
 package-lock.json
+
+meetings.json

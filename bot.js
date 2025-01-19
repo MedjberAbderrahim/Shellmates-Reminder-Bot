@@ -174,6 +174,19 @@ const PREFIX = '!'; // The prefix for the commands
 let adminRoleId = null; // Variable to store the selected admin role
 let meetings = {}; // To store meetings
 
+//add to json file
+const fs = require('fs').promises; // 
+
+// Updated saveToJSON function with async/await
+async function saveToJSON(data, filename) {
+    try {
+        await fs.writeFile(filename, JSON.stringify(data, null, 2), 'utf8');
+        console.log('Meetings saved to JSON file successfully.');
+    } catch (err) {
+        console.error('Error saving to JSON file:', err);
+    }
+}
+
 client.once('ready', () => {
     console.log(`${client.user.tag} is ready to work!`);
 
@@ -309,6 +322,7 @@ client.on('messageCreate', async (message) => {
             const meetingId = crypto.randomBytes(16).toString('hex');
             meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
             scheduleReminder(meetingId)
+            
 
             let replyMessage = `${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\n`
             if (comment)
@@ -474,6 +488,7 @@ client.on('interactionCreate', async (interaction) => {
         const meetingId = crypto.randomBytes(16).toString('hex');
         meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId };
         scheduleReminder(meetingId)
+        await saveToJSON(meetings, 'meetings.json');
 
         let replyMessage = `${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\n`
         if (comment)

@@ -49,7 +49,7 @@ async function sendReminder(meetingId, lastReminder) {
     const { meetingDate, details, comment, resolvedMentions, channelId } = meeting;
 
     const now = new Date();
-    const timeRemaining = Math.max(0, meetingDate.getTime() - now.getTime() + 1000); // Ensure non-negative time remaining, added 1000 to to avoid minus 1 minute in announcement (e.g. meeting in 55 min, it says it is in 54 min)
+    const timeRemaining = Math.max(0, meetingDate.getTime() - now.getTime() + 1000); // Ensure non-negative time remaining
     const minutesRemaining = Math.floor(timeRemaining / (1000 * 60));
 
     // Convert minutes to a human-readable format
@@ -71,26 +71,37 @@ async function sendReminder(meetingId, lastReminder) {
         hour12: true,
     });
 
-    let messageContent = `
-🔔 **Meeting Reminder** 🔔
+    // Create the embed
+    const reminderEmbed = new EmbedBuilder()
+        .setColor(0x0099ff) // Use a color to represent the reminder (e.g., blue)
+        .setTitle('🔔 Meeting Reminder 🔔')
+        .setDescription(`You have a meeting scheduled ${timeAnnouncement}.`)
+        .addFields(
+            { name: '📅 Date', value: formattedDate, inline: true },
+            { name: '⏰ Time', value: formattedTime, inline: true },
+            { name: '📜 Details', value: details || 'No details provided.', inline: false }
+        )
+        .setTimestamp()
+        .setFooter({ text: 'Reminder System by Shellmates' });
 
-${resolvedMentions?.join(' ') || ''},
-${timeAnnouncement},
-You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.
-
-**Details:** ${details}
-`;
-
-    if (comment)
-        messageContent += `**Comment:** ${comment}\n`;
-
-    messageContent += `\n*Reminder system*`;
+    // Add comment if it exists
+    if (comment) {
+        reminderEmbed.addFields({
+            name: '📝 Comment',
+            value: comment || 'No comment provided.',
+            inline: false,
+        });
+    }
 
     try {
         const channel = await client.channels.fetch(channelId);
-        await channel.send(messageContent);
-    }
-    catch (error) {
+
+        // Send the mentions as plain text to trigger notifications
+        const mentionText = resolvedMentions?.join(' ') || 'No participants mentioned.';
+
+        // Send the embed with mentions
+        await channel.send({ content: mentionText, embeds: [reminderEmbed] });
+    } catch (error) {
         console.error(`Failed to send reminder to channel ${channelId}:`, error);
     }
 
@@ -101,6 +112,7 @@ You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.
         await deleteFromJSON(meetingId, MEETINGS_FILE);
     }
 }
+
 
 function deleteMeeting(meetingID) {
     if (!meetings[meetingID])
@@ -635,7 +647,15 @@ client.on('interactionCreate', async (interaction) => {
 
         replyMessage += `Custom Reminders: ${reminders.map(r => `${r}m`).join(', ')}`;
 
-        await interaction.reply(replyMessage);
+        const addMeetingEmbed = new EmbedBuilder ()
+        .setColor(0x0099ff)
+        .setTitle('Meeting Scheduled')
+        .setDescription(replyMessage)
+        .setTimestamp()
+        .setFooter({text : 'Created by Shellmates'});
+        
+        await interaction.reply({embeds:[addMeetingEmbed]}); 
+        
     }
 
 
@@ -701,11 +721,26 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'removemeeting') {
         const meetingId = options.getString('id');
         if (!meetings[meetingId]) {
-            return interaction.reply('❌ No meeting found with that ID.');
+            const noMeetingEmbed = new EmbedBuilder()
+               .setColor(0x0099ff)
+               .setTitle('Remove Meeting')
+               .setDescription('❌ No meeting found with that ID.')
+               .setTimestamp()
+               .setFooter({ text: 'Created by Shellmates' })
+            await interaction.reply({embeds:[noMeetingEmbed]});
+            return;
         }
 
         delete meetings[meetingId];
-        await interaction.reply(`✅ Meeting with ID **${meetingId}** has been removed.`);
+
+        const meetingRemoved = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setTitle('Meeting Removed')
+        .setDescription(`✅ Meeting with ID **${meetingId}** has been successfully removed.`)
+        .setTimestamp()
+        .setFooter({text : 'Created by Shellmates'});
+        
+        await interaction.reply({embeds:[meetingRemoved]});
     }
 
     // Handle /selectrole (slash command)

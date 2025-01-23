@@ -718,7 +718,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // Handle /removemeeting (slash command)
-    if (commandName === 'removemeeting') {
+    if (commandName === 'remove_meeting') {
         const meetingId = options.getString('id');
         if (!meetings[meetingId]) {
             const noMeetingEmbed = new EmbedBuilder()
@@ -732,7 +732,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         delete meetings[meetingId];
-
+        await deleteFromJSON(meetingId,MEETINGS_FILE)
         const meetingRemoved = new EmbedBuilder()
         .setColor(0x0099ff)
         .setTitle('Meeting Removed')

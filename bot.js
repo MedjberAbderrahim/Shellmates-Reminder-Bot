@@ -306,8 +306,37 @@ async function deleteFromJSON(meetingId, filename) {
     }
 }
 
-client.once('ready', () => {
+//fiha prblm 
+async function loadMeetingsFromJSON() {
+    try {
+      const data = await fs.readFile(MEETINGS_FILE, 'utf-8'); 
+      const allMeetings = JSON.parse(data);
+  
+      const now = new Date();
+      const filteredMeetings = {};
+  
+      // Filter meetings with dates greater than the current time
+      for (const [key, meeting] of Object.entries(allMeetings)) {
+        const meetingDate = new Date(meeting.meetingDate);
+        if (meetingDate > now) {
+          filteredMeetings[key] = meeting;
+        }
+      }
+  
+      meetings = filteredMeetings ; 
+      // Overwrite the JSON file with the filtered meetings to get a new version of json
+      await fs.writeFile(MEETINGS_FILE, JSON.stringify(filteredMeetings, null, 2), 'utf-8');
+  
+      console.log('Future meetings loaded and saved successfully ');
+    } catch (error) {
+      console.error('Error processing meetings.json:', error.message);
+    }
+  }
+
+client.once('ready', async   () => {
     console.log(`${client.user.tag} is ready to work!`);
+
+    await loadMeetingsFromJSON();//there is a problem , mindak ytfa lbot wahdo 
 
     const commands = [
         new SlashCommandBuilder()

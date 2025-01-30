@@ -314,7 +314,6 @@ async function deleteFromJSON(meetingId, filename) {
     }
 }
 
-//fiha prblm 
 async function loadMeetingsFromJSON() {
     try {
         const data = await fs.promises.readFile(MEETINGS_FILE, 'utf-8');
@@ -338,9 +337,9 @@ async function loadMeetingsFromJSON() {
         console.log('Future meetings loaded and saved successfully ');
     }
     catch (error) {
-          console.error('Error processing meetings.json:', error.message);
+        console.error('Error processing meetings.json:', error.message);
     }
-  }
+}
 
 client.once('ready', async   () => {
     console.log(`${client.user.tag} is ready to work!`);
@@ -519,6 +518,8 @@ client.on('messageCreate', async (message) => {
             const meetingID = args[0]
             if (!meetings[meetingID])
                 return message.reply('❌ No meeting found with that ID.');
+
+            await message.reply('Sending Reminder for meeting...')
 
             await sendReminder(meetingID, false)
             return;
@@ -736,6 +737,8 @@ client.on('interactionCreate', async (interaction) => {
             const meetingID = options.getString('id');
             if (!meetings[meetingID])
                 return interaction.reply('❌ No meeting found with that ID.');
+
+            await interaction.reply('Sending Reminder for meeting...')
 
             await sendReminder(meetingID, false)
             return;

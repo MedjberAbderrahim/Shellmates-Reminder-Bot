@@ -20,7 +20,7 @@ function scheduleReminder(meetingId) {
         return;
     }
 
-    const meetingTimestamp = meeting.meetingDate.getTime();
+    const meetingTimestamp = new Date(meeting.meetingDate).getTime();
 
     // Calculate the reminder timestamps
     const reminderTimes = meeting.reminders.map(minutes => meetingTimestamp - minutes * 60 * 1000);
@@ -48,8 +48,9 @@ async function sendReminder(meetingId, lastReminder) {
 
     const { meetingDate, details, comment, resolvedMentions, channelId } = meeting;
 
+    const meetingTimeObject = new Date(meetingDate);
     const now = new Date();
-    const timeRemaining = Math.max(0, meetingDate.getTime() - now.getTime() + 1000); // Ensure non-negative time remaining, added 1000 to to avoid minus 1 minute in announcement (e.g. meeting in 55 min, it says it is in 54 min)
+    const timeRemaining = Math.max(0, meetingTimeObject.getTime() - now.getTime() + 1000); // Ensure non-negative time remaining
     const minutesRemaining = Math.floor(timeRemaining / (1000 * 60));
 
     // Convert minutes to a human-readable format
@@ -60,37 +61,48 @@ async function sendReminder(meetingId, lastReminder) {
                 ? `in ${minutesRemaining} minute${minutesRemaining === 1 ? '' : 's'}`
                 : `in ${Math.floor(minutesRemaining / 60)} hour${Math.floor(minutesRemaining / 60) === 1 ? '' : 's'} and ${minutesRemaining % 60} minute${minutesRemaining % 60 === 1 ? '' : 's'}`;
 
-    const formattedDate = meetingDate.toLocaleDateString('en-US', {
+    const formattedDate = meetingTimeObject.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
     });
-    const formattedTime = meetingDate.toLocaleTimeString('en-US', {
+    const formattedTime = meetingTimeObject.toLocaleTimeString('en-US', {
         hour: '2-digit',
         minute: '2-digit',
         hour12: true,
     });
 
-    let messageContent = `
-🔔 **Meeting Reminder** 🔔
+    // Create the embed
+    const reminderEmbed = new EmbedBuilder()
+        .setColor(0x0099ff) // Use a color to represent the reminder (e.g., blue)
+        .setTitle('🔔 Meeting Reminder 🔔')
+        .setDescription(`You have a meeting scheduled ${timeAnnouncement}.`)
+        .addFields(
+            { name: '📅 Date', value: formattedDate, inline: true },
+            { name: '⏰ Time', value: formattedTime, inline: true },
+            { name: '📜 Details', value: details || 'No details provided.', inline: false }
+        )
+        .setTimestamp()
+        .setFooter({ text: 'Reminder System by Shellmates' });
 
-${resolvedMentions?.join(' ') || ''},
-${timeAnnouncement},
-You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.
-
-**Details:** ${details}
-`;
-
-    if (comment)
-        messageContent += `**Comment:** ${comment}\n`;
-
-    messageContent += `\n*Reminder system*`;
+    // Add comment if it exists
+    if (comment) {
+        reminderEmbed.addFields({
+            name: '📝 Comment',
+            value: comment || 'No comment provided.',
+            inline: false,
+        });
+    }
 
     try {
         const channel = await client.channels.fetch(channelId);
-        await channel.send(messageContent);
-    }
-    catch (error) {
+
+        // Send the mentions as plain text to trigger notifications
+        const mentionText = resolvedMentions?.join(' ') || '';
+
+        // Send the embed with mentions
+        await channel.send({ content: mentionText, embeds: [reminderEmbed] });
+    } catch (error) {
         console.error(`Failed to send reminder to channel ${channelId}:`, error);
     }
 
@@ -101,6 +113,7 @@ You have a meeting scheduled on **${formattedDate}** at **${formattedTime}**.
         await deleteFromJSON(meetingId, MEETINGS_FILE);
     }
 }
+
 
 function deleteMeeting(meetingID) {
     if (!meetings[meetingID])
@@ -220,11 +233,18 @@ const client = new Client({
 const TOKEN = 'MTMyMjIxOTIwNzI4NjMyNTI5OQ.G30yQv.GJRwN_VEOBFgS6OP2WVWvY1rBY-hBESqgFAFj8'; // Replace with your bot's token
 const PREFIX = '!'; // The prefix for the commands
 const MEETINGS_FILE = 'meetings.json'
+const DEFAULT_REMINDERS = [0, 10]
 let adminRoleId = null; // Variable to store the selected admin role
 let meetings = {}; // To store meetings
 
 //add to json file
-const fs = require('fs').promises; // 
+const fs = require('fs');
+
+// Creating MEETINGS_FILE in here, if not already created
+if (!fs.existsSync(MEETINGS_FILE)) {
+    fs.writeFileSync(MEETINGS_FILE, JSON.stringify({}, null, 4)); // Create an empty JSON object
+    console.log(`File '${MEETINGS_FILE}' has been created.`);
+}
 
 // Updated saveToJSON function with async/await
 async function saveToJSON(meetingId, data, filename) {
@@ -232,7 +252,7 @@ async function saveToJSON(meetingId, data, filename) {
         let existingData = {};
 
         try {
-            const fileContent = await fs.readFile(filename, 'utf8');
+            const fileContent = await fs.promises.readFile(filename, 'utf8');
             existingData = JSON.parse(fileContent);
         }
         catch (err) {
@@ -249,7 +269,7 @@ async function saveToJSON(meetingId, data, filename) {
         }
 
         existingData[meetingId] = data;
-        await fs.writeFile(filename, JSON.stringify(existingData, null, 4), 'utf8');
+        await fs.promises.writeFile(filename, JSON.stringify(existingData, null, 4), 'utf8');
     }
     catch (err) {
         console.error('Error saving to JSON file:', err);
@@ -261,7 +281,7 @@ async function deleteFromJSON(meetingId, filename) {
         let existingData = {};
 
         try {
-            const fileContent = await fs.readFile(filename, 'utf8');
+            const fileContent = await fs.promises.readFile(filename, 'utf8');
             existingData = JSON.parse(fileContent);
         }
         catch (err) {
@@ -287,14 +307,41 @@ async function deleteFromJSON(meetingId, filename) {
             return;
         }
 
-        await fs.writeFile(filename, JSON.stringify(existingData, null, 4), 'utf8');
+        await fs.promises.writeFile(filename, JSON.stringify(existingData, null, 4), 'utf8');
     }
     catch (err) {
         console.error('Error deleting from JSON file:', err);
     }
 }
 
-client.once('ready', () => {
+async function loadMeetingsFromJSON() {
+    try {
+        const data = await fs.promises.readFile(MEETINGS_FILE, 'utf-8');
+        const allMeetings = JSON.parse(data);
+
+        const now = new Date();
+
+        // Filter meetings with dates greater than the current time
+        for (const [key, meeting] of Object.entries(allMeetings)) {
+            const meetingDate = new Date(meeting.meetingDate);
+            // this is wrong; we must compare 'now' to the last (closest to meetingDate) reminder of the meetings[key]
+            if (meetingDate > now) {
+                meetings[key] = meeting;
+                scheduleReminder(key);
+            }
+        }
+
+        // Overwrite the JSON file with the filtered meetings to get a new version of json
+        await fs.promises.writeFile(MEETINGS_FILE, JSON.stringify(meetings, null, 4), 'utf-8');
+
+        console.log('Future meetings loaded and saved successfully ');
+    }
+    catch (error) {
+        console.error('Error processing meetings.json:', error.message);
+    }
+}
+
+client.once('ready', async   () => {
     console.log(`${client.user.tag} is ready to work!`);
 
     const commands = [
@@ -303,17 +350,17 @@ client.once('ready', () => {
             .setDescription('Schedule a new meeting')
             .addStringOption(option =>
                 option.setName('details')
-                    .setDescription('Details of the meeting')
+                    .setDescription('Details of the meeting.')
                     .setRequired(true)
             )
             .addStringOption(option =>
                 option.setName('date')
-                    .setDescription('The date for the meeting (DD-MM-YYYY or DD/MM/YYYY)')
+                    .setDescription('The date for the meeting in the format of YYYY-MM-DD.')
                     .setRequired(true)
             )
             .addStringOption(option =>
                 option.setName('time')
-                    .setDescription('The time for the meeting (HH:MM)')
+                    .setDescription('The time for the meeting (HH:MM), in 24-Hours format.')
                     .setRequired(true)
             )
             .addStringOption(option =>
@@ -323,7 +370,7 @@ client.once('ready', () => {
             )
             .addStringOption(option =>
                 option.setName('comment')
-                    .setDescription('Comment about the meeting')
+                    .setDescription('Comment about the meeting.')
                     .setRequired(false)
             )
             .addStringOption(option =>
@@ -367,7 +414,9 @@ client.once('ready', () => {
     ];
 
     // Trying to register commands globally, but it may take more time
-    client.application.commands.set(commands)
+    await client.application.commands.set(commands)
+    await loadMeetingsFromJSON();//there is a problem , mindak ytfa lbot wahdo
+
 });
 
 client.on('messageCreate', async (message) => {
@@ -376,29 +425,22 @@ client.on('messageCreate', async (message) => {
     if (!message.content.startsWith(PREFIX))
         return
 
-    // Handle prefix commands
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
+    const rawArgs = message.content.slice(PREFIX.length).trim();
+    const args = parseArgs(rawArgs); // Use your custom parseArgs function
+    const command = args.shift().toLowerCase(); // First argument is the command
 
     switch (command) {
         case 'add_meeting': {
-            // if (!adminRoleId || !message.member.roles.cache.has(adminRoleId)) {
-            //     return message.reply('❌ You do not have permission to schedule meetings.');
-            // }
+            // if (interaction.guild && !interaction.member.roles.cache.has(adminRoleId))
+            //     return interaction.reply('❌ You do not have permission to schedule meetings.');
 
-            let arguments = parseArgs(args.join(' ')).map(arg => arg.trim());
-
-            // Now, assign the trimmed arguments
-            const details = arguments[0]; // Meeting details
-            const date = arguments[1];
-            const time = arguments[2];
-            const comment = arguments[3]; // Comment
-            const tags = arguments[4];
-            const customReminders = arguments[5]; // Custom reminders (optional)
-
-            // Verify existence of required fields (details, date, and time)
-            if (!details || !date || !time)
-                return message.reply('❌ Please provide a valid date, time, details, and comment.');
+            // Now, assign the parsed arguments
+            const details = args[0]; // Meeting details
+            const date = args[1];
+            const time = args[2];
+            const tags = args[3]?.trim();
+            const customReminders = args[4]?.trim(); // Custom reminders (optional)
+            const comment = args[5]; // Comment
 
             // Date treatment and filtering
             const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
@@ -423,12 +465,11 @@ client.on('messageCreate', async (message) => {
 
             // Default reminders if none provided
             if (!reminders.length)
-                reminders = [0, 10]; // Default reminders: 0m and 10m
+                reminders = DEFAULT_REMINDERS; // Default reminders: 0m and 10m
 
-            // Process mentions
             const resolvedMentions = [];
             if (tags) {
-                const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g); // Matches Discord user mentions or plain usernames
+                const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
 
                 if (mentions)
                     for (const mention of mentions)
@@ -443,43 +484,45 @@ client.on('messageCreate', async (message) => {
 
             const channelId = message.channelId;
             const meetingId = crypto.randomBytes(16).toString('hex');
-            meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId, reminders };
+            meetings[meetingId] = {meetingDate, details, comment, resolvedMentions, channelId, reminders};
 
-            // Schedule reminders
-            scheduleReminder(meetingId, reminders);
-            await saveToJSON(meetingId, { meetingDate, details, comment, resolvedMentions, channelId, reminders }, MEETINGS_FILE);
+            scheduleReminder(meetingId); // Ensure this function uses the reminders array
+            await saveToJSON(meetingId, {
+                meetingDate,
+                details,
+                comment,
+                resolvedMentions,
+                channelId,
+                reminders
+            }, MEETINGS_FILE);
 
-            let replyMessage = `${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\n`;
+            let replyMessage = `✅ Meeting scheduled for **${date}** at **${time}**\n/**Details**: ${details}\n`
             if (comment)
                 replyMessage += `**Comment:** ${comment}\n`;
 
-            replyMessage += `Custom Reminders: ${reminders.map(r => `${r}m`).join(', ')}`;
+            replyMessage += `**Custom Reminders:** ${reminders.map(r => `${r}m`).join(', ')}`;
 
-            await message.reply(replyMessage);
+            const addMeetingEmbed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Meeting Scheduled')
+                .setDescription(replyMessage)
+                .setTimestamp()
+                .setFooter({text: 'Created by Shellmates'});
 
-            break;
-        }
-
-        case 'removemeeting': {
-            if (deleteMeeting(args[0]))
-                await message.reply(`✅ Meeting with ID **${args[0]}** has been removed.`);
-            else
-                await message.reply(`❌ No meeting found with ID **${args[0]}**.`);
+            await message.reply({content: `${resolvedMentions?.join(' ') || ''}\n`, embeds: [addMeetingEmbed]});
 
             break;
         }
 
-        case 'selectrole':
-            if (message.author.id !== message.guild.ownerId)
-                return message.reply('❌ Only the server owner can select the admin role.');
+        case 'remind':
+            const meetingID = args[0]
+            if (!meetings[meetingID])
+                return message.reply('❌ No meeting found with that ID.');
 
-            const role = message.mentions.roles.first();
-            if (!role)
-                return message.reply('❌ Please mention a role to select.');
+            await message.reply('Sending Reminder for meeting...')
 
-            adminRoleId = role.id;
-            await message.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
-            break;
+            await sendReminder(meetingID, false)
+            return;
 
         case 'meetings':
             if (!Object.keys(meetings).length)
@@ -491,6 +534,7 @@ client.on('messageCreate', async (message) => {
 
             const meetingPromises = Object.keys(meetings).map(async (meetingId) => {
                 const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
+                const meetingDateObject = new Date(meetingDate);
                 if (channelId === message.channelId) {
                     const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
                         if (mention.startsWith('<@&')) {
@@ -515,17 +559,16 @@ client.on('messageCreate', async (message) => {
 
                     // Format the meeting details more clearly
                     displayedMeetings += `\n**Meeting ID**: ${meetingId}\n`;
-                    displayedMeetings += `**Date**: ${meetingDate}\n`;
+                    displayedMeetings += `**Date**: ${meetingDateObject}\n`;
                     displayedMeetings += `**Details**: ${details}\n`;
                     if (comment)
                         displayedMeetings += `**Comment**: ${comment}\n`;
-                    if (targets.length > 0)
-                        displayedMeetings += `**Targets**: ${targets}\n`;
+
+                    displayedMeetings += `**Targets**: ${targets.length > 0 ? targets.join(', ') : 'No Targets'}\n`;
                     displayedMeetings += `-----------------------------\n`; // A separator line for each meeting
                 }
             });
             await Promise.all(meetingPromises); // Wait for all promises to resolve before sending the response
-
             if (displayedMeetings === "")
                 await message.reply('There are no meetings currently scheduled.');
             else
@@ -533,14 +576,50 @@ client.on('messageCreate', async (message) => {
 
             break;
 
-        case 'removerole':
-            if (message.author.id !== message.guild.ownerId) {
-                return message.reply('❌ Only the server owner can remove the admin role.');
+        case 'remove_meeting':
+            const meetingId = args[0];
+            if (!meetings[meetingId]) {
+                const noMeetingEmbed = new EmbedBuilder()
+                    .setColor(0x0099ff)
+                    .setTitle('Remove Meeting')
+                    .setDescription('❌ No meeting found with that ID.')
+                    .setTimestamp()
+                    .setFooter({ text: 'Created by Shellmates' })
+                await message.reply({embeds:[noMeetingEmbed]});
+                return;
             }
+
+            delete meetings[meetingId];
+            await deleteFromJSON(meetingId,MEETINGS_FILE)
+            const meetingRemoved = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Meeting Removed')
+                .setDescription(`✅ Meeting with ID **${meetingId}** has been successfully removed.`)
+                .setTimestamp()
+                .setFooter({text : 'Created by Shellmates'});
+
+            await message.reply({embeds:[meetingRemoved]});
+
+            break;
+
+        case 'select_role':
+            if (user.id !== message.guild.ownerId)
+                return message.reply('❌ Only the server owner can select the admin role.');
+
+            const role = args[0];
+            adminRoleId = role.id;
+            await message.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
+
+            break;
+
+        case 'remove_role':
+            if (message.author.id !== message.guild.ownerId)
+                return message.reply('❌ Only the server owner can remove the admin role.');
 
             adminRoleId = null;
             await message.reply('✅ Admin role has been removed.');
             break;
+
         case 'help':
             const helpEmbed = new EmbedBuilder()
                 .setColor(0x0099ff)
@@ -551,7 +630,8 @@ client.on('messageCreate', async (message) => {
                     { name: '!meetings', value: 'View all scheduled meetings.' },
                     { name: '!removemeeting', value: 'Remove a scheduled meeting by its ID.' },
                     { name: '!selectrole', value: 'Set the role that can manage meetings.' },
-                    { name: '!removerole', value: 'Remove the selected admin role.' }
+                    { name: '!removerole', value: 'Remove the selected admin role.' },
+                    { name: '!remind', value: 'Manually send a reminder for an existing meeting.' },
                 )
                 .setTimestamp()
                 .setFooter({ text: 'Created by Shellmates' });
@@ -569,183 +649,216 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
 
     const { commandName, options, user } = interaction;
+    switch (commandName) {
+        case 'add_meeting': {
+            // if (interaction.guild && !interaction.member.roles.cache.has(adminRoleId))
+            //     return interaction.reply('❌ You do not have permission to schedule meetings.');
 
-    if (commandName === 'add_meeting') {
-        // if (interaction.guild && !interaction.member.roles.cache.has(adminRoleId))
-        //     return interaction.reply('❌ You do not have permission to schedule meetings.');
+            const details = options.getString('details');
+            const date = options.getString('date');
+            const time = options.getString('time');
+            const comment = options.getString('comment');
+            const tags = options.getString('tags');
+            const customReminders = options.getString('custom_reminders');
 
-        const details = options.getString('details');
-        const date = options.getString('date');
-        const time = options.getString('time');
-        const comment = options.getString('comment');
-        const tags = options.getString('tags');
-        const customReminders = options.getString('custom_reminders');
+            // Date treatment and filtering
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(date))
+                return interaction.reply('❌ Invalid date format. Please use yyyy-mm-dd.');
 
-        // Date treatment and filtering
-        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-        if (!dateRegex.test(date))
-            return interaction.reply('❌ Invalid date format. Please use yyyy-mm-dd.');
+            const [year, month, day] = date.split('-');
+            const meetingDate = new Date(`${year}-${month}-${day}T${time}:00`);
 
-        const [year, month, day] = date.split('-');
-        const meetingDate = new Date(`${year}-${month}-${day}T${time}:00`);
+            if (isNaN(meetingDate))
+                return interaction.reply('❌ Invalid date or time format.');
 
-        if (isNaN(meetingDate))
-            return interaction.reply('❌ Invalid date or time format.');
+            const now = new Date();
+            if (meetingDate <= now)
+                return interaction.reply('❌ You cannot schedule a meeting in the past.');
 
-        const now = new Date();
-        if (meetingDate <= now)
-            return interaction.reply('❌ You cannot schedule a meeting in the past.');
+            // Validate and process custom reminders
+            let reminders = [];
 
-        // Validate and process custom reminders
-        let reminders = [];
+            if (customReminders)
+                reminders = resolveCustomReminders(customReminders);
 
-        if (customReminders)
-            reminders = resolveCustomReminders(customReminders);
+            // Default reminders if none provided
+            if (!reminders.length)
+                reminders = DEFAULT_REMINDERS; // Default reminders: 0m and 10m
 
-        // Default reminders if none provided
-        if (!reminders.length)
-            reminders = [0, 10]; // Default reminders: 0m and 10m
+            const resolvedMentions = [];
+            if (tags) {
+                const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
 
-        const resolvedMentions = [];
-        if (tags) {
-            const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
-
-            if (mentions)
-                for (const mention of mentions)
-                    try {
-                        const resolvedMention = await resolveMentions(mention, interaction.guild, interaction.user);
-                        if (resolvedMention)
-                            resolvedMentions.push(resolvedMention);
-                    }
-                    catch (error) {
-                        console.error(`Failed to resolve mention: ${mention}`, error);
-                    }
-        }
-
-        const channelId = interaction.channelId;
-        const meetingId = crypto.randomBytes(16).toString('hex');
-        meetings[meetingId] = { meetingDate, details, comment, resolvedMentions, channelId, reminders };
-
-        scheduleReminder(meetingId, reminders); // Ensure this function uses the reminders array
-        await saveToJSON(meetingId, { meetingDate, details, comment, resolvedMentions, channelId, reminders }, MEETINGS_FILE);
-
-        let replyMessage = `${resolvedMentions?.join(' ') || ''}\n✅ Meeting scheduled for **${date}** at **${time}**\nDetails: **${details}**\n`
-        if (comment)
-            replyMessage += `**Comment:** ${comment}\n`;
-
-        replyMessage += `Custom Reminders: ${reminders.map(r => `${r}m`).join(', ')}`;
-
-        await interaction.reply(replyMessage);
-    }
-
-
-    if (commandName === 'Remind') {
-        const meetingID = options.getString('id');
-        if (!meetings[meetingID])
-            return interaction.reply('❌ No meeting found with that ID.');
-
-        await sendReminder(meetingID, false)
-        return;
-    }
-    // Handle /meetings (slash command)
-    if (commandName === 'meetings') {
-        if (!Object.keys(meetings).length)
-            return interaction.reply('There are no meetings currently scheduled.');
-
-        let msg1 = '📅 **Upcoming Meetings**:\n';
-        let displayedMeetings = "";
-        let guild = interaction.guild;
-
-        const meetingPromises = Object.keys(meetings).map(async (meetingId) => {
-            const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
-            if (channelId === interaction.channelId) {
-                const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
-                    if (mention.startsWith('<@&')) {
-                        // For role mentions (e.g., <@&roleID>)
-                        const roleId = mention.slice(3, -1); // Removes <@& and >
-                        const role = await guild.roles.fetch(roleId);
-                        return `@${role.name}`; // Display the role name with @
-                    }
-                    else if (mention.startsWith('<@')) {
-                        // For user mentions (e.g., <@userID>)
-                        let id = mention.slice(2, -1);
-                        if (id === interaction.user.id)
-                            return `@${interaction.user.username}`;
-                        if (id === client.user.id)
-                            return `@${client.user.username}`;
-
-                        const user = await guild.members.fetch(id);
-                        return `@${user.user.username}`; // Display the username with @
-                    }
-                    return mention; // If it's already a plain text mention, return as is
-                }));
-
-                // Format the meeting details more clearly
-                displayedMeetings += `\n**Meeting ID**: ${meetingId}\n`;
-                displayedMeetings += `**Date**: ${meetingDate}\n`;
-                displayedMeetings += `**Details**: ${details}\n`;
-                displayedMeetings += `**Comment**: ${comment}\n`;
-                displayedMeetings += `**Targets**: ${targets.length > 0 ? targets.join(', ') : 'No Targets'}\n`;
-                displayedMeetings += `-----------------------------\n`; // A separator line for each meeting
+                if (mentions)
+                    for (const mention of mentions)
+                        try {
+                            const resolvedMention = await resolveMentions(mention, interaction.guild, interaction.user);
+                            if (resolvedMention)
+                                resolvedMentions.push(resolvedMention);
+                        } catch (error) {
+                            console.error(`Failed to resolve mention: ${mention}`, error);
+                        }
             }
-        });
-        await Promise.all(meetingPromises); // Wait for all promises to resolve before sending the response
 
-        if (displayedMeetings === "")
-            await interaction.reply('There are no meetings currently scheduled.');
-        else
-            await interaction.reply(msg1 + displayedMeetings);
-    }
+            const channelId = interaction.channelId;
+            const meetingId = crypto.randomBytes(16).toString('hex');
+            meetings[meetingId] = {meetingDate, details, comment, resolvedMentions, channelId, reminders};
 
-    // Handle /removemeeting (slash command)
-    if (commandName === 'removemeeting') {
-        const meetingId = options.getString('id');
-        if (!meetings[meetingId]) {
-            return interaction.reply('❌ No meeting found with that ID.');
+            scheduleReminder(meetingId); // Ensure this function uses the reminders array
+            await saveToJSON(meetingId, {
+                meetingDate,
+                details,
+                comment,
+                resolvedMentions,
+                channelId,
+                reminders
+            }, MEETINGS_FILE);
+
+            let replyMessage = `✅ Meeting scheduled for **${date}** at **${time}**\n**Details**: ${details}\n`
+            if (comment)
+                replyMessage += `**Comment:** ${comment}\n`;
+
+            replyMessage += `**Custom Reminders:** ${reminders.map(r => `${r}m`).join(', ')}`;
+
+            const addMeetingEmbed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Meeting Scheduled')
+                .setDescription(replyMessage)
+                .setTimestamp()
+                .setFooter({text: 'Created by Shellmates'});
+
+            await interaction.reply({content: `${resolvedMentions?.join(' ') || ''}\n`, embeds: [addMeetingEmbed]});
+
+            break;
         }
 
-        delete meetings[meetingId];
-        await interaction.reply(`✅ Meeting with ID **${meetingId}** has been removed.`);
-    }
+        case 'remind':
+            const meetingID = options.getString('id');
+            if (!meetings[meetingID])
+                return interaction.reply('❌ No meeting found with that ID.');
 
-    // Handle /selectrole (slash command)
-    if (commandName === 'selectrole') {
-        if (user.id !== interaction.guild.ownerId) {
-            return interaction.reply('❌ Only the server owner can select the admin role.');
-        }
+            await interaction.reply('Sending Reminder for meeting...')
 
-        const role = options.getRole('role');
-        adminRoleId = role.id;
-        await interaction.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
-    }
+            await sendReminder(meetingID, false)
+            return;
 
-    // Handle /removerole (slash command)
-    if (commandName === 'removerole') {
-        if (user.id !== interaction.guild.ownerId)
-            return interaction.reply('❌ Only the server owner can remove the admin role.');
+        case 'meetings':
+            if (!Object.keys(meetings).length)
+                return interaction.reply('There are no meetings currently scheduled.');
 
-        adminRoleId = null;
-        await interaction.reply('✅ Admin role has been removed.');
-    }
+            let msg1 = '📅 **Upcoming Meetings**:\n';
+            let displayedMeetings = "";
+            let guild = interaction.guild;
 
-    // Handle /help (slash command)
-    if (commandName === 'help') {
-        const helpEmbed = new EmbedBuilder()
-            .setColor(0x0099ff)
-            .setTitle('Shellmates Meeting Bot - Help')
-            .setDescription('Here are the commands you can use:')
-            .addFields(
-                { name: '/addmeeting', value: 'Schedule a new meeting.' },
-                { name: '/meetings', value: 'View all scheduled meetings.' },
-                { name: '/removemeeting', value: 'Remove a scheduled meeting by its ID.' },
-                { name: '/selectrole', value: 'Set the role that can manage meetings.' },
-                { name: '/removerole', value: 'Remove the selected admin role.' },
-                { name: '/remind', value: 'Manually send a reminder for an existing meeting.' },
-            )
-            .setTimestamp()
-            .setFooter({ text: 'Created by Shellmates' });
+            const meetingPromises = Object.keys(meetings).map(async (meetingId) => {
+                const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
+                const meetingDateObject = new Date(meetingDate);
+                if (channelId === interaction.channelId) {
+                    const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
+                        if (mention.startsWith('<@&')) {
+                            // For role mentions (e.g., <@&roleID>)
+                            const roleId = mention.slice(3, -1); // Removes <@& and >
+                            const role = await guild.roles.fetch(roleId);
+                            return `@${role.name}`; // Display the role name with @
+                        }
+                        else if (mention.startsWith('<@')) {
+                            // For user mentions (e.g., <@userID>)
+                            let id = mention.slice(2, -1);
+                            if (id === interaction.user.id)
+                                return `@${interaction.user.username}`;
+                            if (id === client.user.id)
+                                return `@${client.user.username}`;
 
-        await interaction.reply({ embeds: [helpEmbed] });
+                            const user = await guild.members.fetch(id);
+                            return `@${user.user.username}`; // Display the username with @
+                        }
+                        return mention; // If it's already a plain text mention, return as is
+                    }));
+
+                    // Format the meeting details more clearly
+                    displayedMeetings += `\n**Meeting ID**: ${meetingId}\n`;
+                    displayedMeetings += `**Date**: ${meetingDateObject}\n`;
+                    displayedMeetings += `**Details**: ${details}\n`;
+                    if (comment)
+                        displayedMeetings += `**Comment**: ${comment}\n`;
+
+                    displayedMeetings += `**Targets**: ${targets.length > 0 ? targets.join(', ') : 'No Targets'}\n`;
+                    displayedMeetings += `-----------------------------\n`; // A separator line for each meeting
+                }
+            });
+            await Promise.all(meetingPromises); // Wait for all promises to resolve before sending the response
+            if (displayedMeetings === "")
+                await interaction.reply('There are no meetings currently scheduled.');
+            else
+                await interaction.reply(msg1 + displayedMeetings);
+
+            break;
+
+        case 'remove_meeting':
+            const meetingId = options.getString('id');
+            if (!meetings[meetingId]) {
+                const noMeetingEmbed = new EmbedBuilder()
+                    .setColor(0x0099ff)
+                    .setTitle('Remove Meeting')
+                    .setDescription('❌ No meeting found with that ID.')
+                    .setTimestamp()
+                    .setFooter({ text: 'Created by Shellmates' })
+                await interaction.reply({embeds:[noMeetingEmbed]});
+                return;
+            }
+
+            delete meetings[meetingId];
+            await deleteFromJSON(meetingId,MEETINGS_FILE)
+            const meetingRemoved = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Meeting Removed')
+                .setDescription(`✅ Meeting with ID **${meetingId}** has been successfully removed.`)
+                .setTimestamp()
+                .setFooter({text : 'Created by Shellmates'});
+
+            await interaction.reply({embeds:[meetingRemoved]});
+
+            break;
+
+        case 'select_role':
+            if (user.id !== interaction.guild.ownerId)
+                return interaction.reply('❌ Only the server owner can select the admin role.');
+
+            const role = options.getRole('role');
+            adminRoleId = role.id;
+            await interaction.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
+
+            break;
+
+        case 'remove_role':
+            if (user.id !== interaction.guild.ownerId)
+                return interaction.reply('❌ Only the server owner can remove the admin role.');
+
+            adminRoleId = null;
+            await interaction.reply('✅ Admin role has been removed.');
+
+            break;
+
+        case 'help':
+            const helpEmbed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Shellmates Meeting Bot - Help')
+                .setDescription('Here are the commands you can use:')
+                .addFields(
+                    { name: '/addmeeting', value: 'Schedule a new meeting.' },
+                    { name: '/meetings', value: 'View all scheduled meetings.' },
+                    { name: '/removemeeting', value: 'Remove a scheduled meeting by its ID.' },
+                    { name: '/selectrole', value: 'Set the role that can manage meetings.' },
+                    { name: '/removerole', value: 'Remove the selected admin role.' },
+                    { name: '/remind', value: 'Manually send a reminder for an existing meeting.' },
+                )
+                .setTimestamp()
+                .setFooter({ text: 'Created by Shellmates' });
+
+            await interaction.reply({ embeds: [helpEmbed] });
+
+            break;
     }
 });
 

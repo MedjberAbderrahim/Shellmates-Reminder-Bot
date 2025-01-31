@@ -14,7 +14,6 @@ function scheduleReminder(meetingId) {
     const nowDate = new Date();
     const now = nowDate.getTime(); // Use a timestamp for consistency
     let meeting = meetings[meetingId]; // Ensure this is defined and valid
-
     if (!meeting || !meeting.reminders || !Array.isArray(meeting.reminders)) {
         console.error(`Invalid meeting data or missing reminders for ID: ${meetingId}`);
         return;
@@ -314,26 +313,27 @@ async function deleteFromJSON(meetingId, filename) {
     }
 }
 
-async function loadMeetingsFromJSON() {
+async function loadMeetings() {
     try {
         const data = await fs.promises.readFile(MEETINGS_FILE, 'utf-8');
         const allMeetings = JSON.parse(data);
 
-        const now = new Date();
+        const now = Date.now();
 
-        // Filter meetings with dates greater than the current time
         for (const [key, meeting] of Object.entries(allMeetings)) {
-            const meetingDate = new Date(meeting.meetingDate);
-            // this is wrong; we must compare 'now' to the last (closest to meetingDate) reminder of the meetings[key]
-            if (meetingDate > now) {
+            const meetingTimestamp = new Date(meeting.meetingDate).getTime();
+            const reminderTimes = meeting.reminders.map(minutes => meetingTimestamp - minutes * 60 * 1000);
+            const latestReminderTime = Math.max(...reminderTimes);
+
+            // Keep the meeting only if its last reminder hasn't passed
+            if (latestReminderTime > now) {
                 meetings[key] = meeting;
                 scheduleReminder(key);
             }
         }
 
-        // Overwrite the JSON file with the filtered meetings to get a new version of json
+        // Overwrite JSON with updated meetings
         await fs.promises.writeFile(MEETINGS_FILE, JSON.stringify(meetings, null, 4), 'utf-8');
-
         console.log('Future meetings loaded and saved successfully ');
     }
     catch (error) {
@@ -415,8 +415,7 @@ client.once('ready', async   () => {
 
     // Trying to register commands globally, but it may take more time
     await client.application.commands.set(commands)
-    await loadMeetingsFromJSON();//there is a problem , mindak ytfa lbot wahdo
-
+    await loadMeetings();
 });
 
 client.on('messageCreate', async (message) => {

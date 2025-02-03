@@ -1,5 +1,7 @@
 const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const crypto = require('crypto'); // For generating unique meeting IDs
+const fs = require('fs');
+require('dotenv').config();
 
 function scheduleReminder(meetingId) {
     // meeting = {
@@ -218,18 +220,6 @@ function resolveCustomReminders(customReminders) {
     }).filter(reminder => reminder !== null);
 }
 
-const PERMISSIONS_FILE = 'permissions.json';
-
-const COMMANDS = [
-    "add_meeting",
-    "remove_meeting",
-    "meetings",
-    "remind",
-    "add_permissions",
-    "remove_permissions",
-    "help"
-]
-
 async function checkPermission(user, command, guild) {
     try {
         // Read and parse the permissions file
@@ -355,14 +345,22 @@ const client = new Client({
     partials: ['CHANNEL'],
 });
 
-const TOKEN = 'MTMyMjIxOTIwNzI4NjMyNTI5OQ.G30yQv.GJRwN_VEOBFgS6OP2WVWvY1rBY-hBESqgFAFj8'; // Replace with your bot's token
-const PREFIX = '!'; // The prefix for the commands
-const MEETINGS_FILE = 'meetings.json'
+const TOKEN = process.env.TOKEN
+const PREFIX = '!'; // The prefix for the '!' commands
 const DEFAULT_REMINDERS = [0, 10]
-let meetings = {}; // To store meetings
+const MEETINGS_FILE = 'meetings.json'
+const PERMISSIONS_FILE = 'permissions.json';
+const COMMANDS = [
+    "add_meeting",
+    "remove_meeting",
+    "meetings",
+    "remind",
+    "add_permissions",
+    "remove_permissions",
+    "help"
+]
 
-//add to json file
-const fs = require('fs');
+let meetings = {}; // To store meetings
 
 // Creating MEETINGS_FILE in here, if not already created
 if (!fs.existsSync(MEETINGS_FILE)) {

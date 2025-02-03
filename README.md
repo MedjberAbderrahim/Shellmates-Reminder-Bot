@@ -37,7 +37,7 @@ Shellmates Reminder Bot is a comprehensive Discord bot designed to streamline me
 
 1. Clone the repository
 ```bash
-git clone https://github.com/MedjberAbderrahim/Reminder-Discord-Bot.git
+git clone https://github.com/MedjberAbderrahim/Shellmates-Reminder-Bot.git
 cd shellmates-meeting-bot
 ```
 
@@ -101,8 +101,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-For issues, feature requests, or questions, please [open an issue](https://github.com/your-username/shellmates-meeting-bot/issues) on GitHub.
+For issues, feature requests, or questions, please [open an issue](https://github.com/MedjberAbderrahim/Shellmates-Reminder-Bot/issues) on GitHub.
 
 ---
 
-Created by a team of university club [Shellmates](https://github.com/shellmates).
+Created by a team of university club [Shellmates](https://linktr.ee/shellmates).

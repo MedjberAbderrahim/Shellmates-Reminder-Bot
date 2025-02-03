@@ -218,6 +218,132 @@ function resolveCustomReminders(customReminders) {
     }).filter(reminder => reminder !== null);
 }
 
+const PERMISSIONS_FILE = 'permissions.json';
+
+const COMMANDS = [
+    "add_meeting",
+    "remove_meeting",
+    "meetings",
+    "remind",
+    "add_permissions",
+    "remove_permissions",
+    "help"
+]
+
+async function checkPermission(user, command, guild) {
+    try {
+        // Read and parse the permissions file
+        const data = await fs.promises.readFile(PERMISSIONS_FILE, 'utf-8');
+        const permissions = JSON.parse(data);
+
+        // If there are no permissions stored for this guild
+        if (!permissions[guild.id]) {
+            permissions[guild.id] = {};
+            permissions[guild.id][`<@${guild.ownerId}>`] = COMMANDS.slice(); // Use a copy of COMMANDS
+
+            await fs.promises.writeFile(PERMISSIONS_FILE, JSON.stringify(permissions, null, 4), 'utf-8');
+        }
+
+        // Build the key for the user (full mention string)
+        const userKey = `<@${user.id}>`;
+        // DON'T FORGET TO COMPLETE IT GHDWA, INTEGRATE IT INTO FUNCTIONS, e.g.: checkPermission(author, "add_meeting", guild)
+        // Check direct user permissions.
+        if (permissions[guild.id][userKey] && permissions[guild.id][userKey].includes(command))
+            return true;
+
+        // Fetch the member object to access roles.
+        const member = await guild.members.fetch(user.id);
+
+        // Check for role-based permissions.
+        for (const role of member.roles.cache.values()) {
+            const roleKey = `<@&${role.id}>`;
+            if (permissions[guild.id][roleKey] && permissions[guild.id][roleKey].includes(command))
+                return true;
+        }
+
+        // Check if the universal '@everyone' permissions grant access.
+        if (permissions[guild.id]['<@everyone>'] && permissions[guild.id]['<@everyone>'].includes(command))
+            return true;
+
+        // If none of the checks pass, return false.
+        return false;
+    }
+    catch (error) {
+        console.error("Error checking permissions:", error);
+        return false;
+    }
+}
+
+async function removePermission(tags, commands, guild, author) {
+    // Resolve each target from the provided tags.
+    const resolvedMentions = [];
+    for (const tag of tags)
+        try {
+            const resolvedTag = await resolveMentions(tag, guild, author);
+            if (resolvedTag)
+                resolvedMentions.push(resolvedTag);
+            else
+                return { status_code: 404, err: tag };
+        }
+        catch (error) {
+            console.error(`Failed to resolve mention: ${tag}; error:`, error);
+            return { status_code: 500, err: tag };
+        }
+
+    // For each resolved target, if they exist in the permissions, remove the commands.
+    for (const resolvedTag of resolvedMentions) {
+        if (!permissions[guild.id][resolvedTag])
+            continue; // Nothing to remove if target not present.
+        for (const command of commands) {
+            if (!COMMANDS.includes(command))
+                return { status_code: 405, err: command };
+
+            permissions[guild.id][resolvedTag] = permissions[guild.id][resolvedTag].filter(cmd => cmd !== command);
+        }
+    }
+
+    // Write the updated permissions back to the file.
+    await fs.promises.writeFile(PERMISSIONS_FILE, JSON.stringify(permissions, null, 4), 'utf-8');
+    return { status_code: 200, output: resolvedMentions };
+}
+
+async function addPermission(tags, commands, guild, author) {
+    // Resolve each target from the provided tags.
+    const resolvedMentions = [];
+    for (const tag of tags) {
+        try {
+            const resolvedTag = await resolveMentions(tag, guild, author);
+            if (resolvedTag)
+                resolvedMentions.push(resolvedTag);
+            else
+                return { status_code: 404, err: tag };
+        }
+        catch (error) {
+            console.error(`Failed to resolve mention: ${tag}; error:`, error);
+            return { status_code: 500, err: tag };
+        }
+    }
+
+    // For each resolved target, ensure they have an entry and add the commands if not already present.
+    for (const resolvedTag of resolvedMentions) {
+        if (!permissions[guild.id][resolvedTag])
+            permissions[guild.id][resolvedTag] = [];
+
+        for (const command of commands) {
+            // Check that the command is valid (exists in COMMANDS)
+            if (!COMMANDS.includes(command))
+                return { status_code: 405, err: command };
+
+            if (!permissions[guild.id][resolvedTag].includes(command))
+                permissions[guild.id][resolvedTag].push(command);
+        }
+    }
+
+    // Write the updated permissions back to the file.
+    await fs.promises.writeFile(PERMISSIONS_FILE, JSON.stringify(permissions, null, 4), 'utf-8');
+    return { status_code: 200, output: resolvedMentions };
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -233,7 +359,6 @@ const TOKEN = 'MTMyMjIxOTIwNzI4NjMyNTI5OQ.G30yQv.GJRwN_VEOBFgS6OP2WVWvY1rBY-hBES
 const PREFIX = '!'; // The prefix for the commands
 const MEETINGS_FILE = 'meetings.json'
 const DEFAULT_REMINDERS = [0, 10]
-let adminRoleId = null; // Variable to store the selected admin role
 let meetings = {}; // To store meetings
 
 //add to json file
@@ -334,10 +459,24 @@ async function loadMeetings() {
 
         // Overwrite JSON with updated meetings
         await fs.promises.writeFile(MEETINGS_FILE, JSON.stringify(meetings, null, 4), 'utf-8');
-        console.log('Future meetings loaded and saved successfully ');
+        console.log('Future Meetings loaded successfully...');
     }
     catch (error) {
         console.error('Error processing meetings.json:', error.message);
+    }
+}
+
+let permissions = {};
+
+async function loadPermissions() {
+    try {
+        const data = await fs.promises.readFile(PERMISSIONS_FILE, 'utf-8');
+        permissions = JSON.parse(data);
+        console.log('Permissions loaded successfully...');
+    }
+    catch (error) {
+        await fs.promises.writeFile(PERMISSIONS_FILE, JSON.stringify(permissions, null, 4), 'utf-8');
+        console.log(`Creating a new permissions file '${PERMISSIONS_FILE}'...`);
     }
 }
 
@@ -398,24 +537,36 @@ client.once('ready', async   () => {
                     .setRequired(true)
             ),
         new SlashCommandBuilder()
-            .setName('select_role')
-            .setDescription('Select a role to manage meetings (only server owner can use this)')
-            .addRoleOption(option =>
-                option.setName('role')
-                    .setDescription('The role to select for managing meetings')
-                    .setRequired(true)
-            ),
-        new SlashCommandBuilder()
-            .setName('remove_role')
-            .setDescription('Remove the selected admin role (only server owner can use this)'),
-        new SlashCommandBuilder()
             .setName('help')
             .setDescription('Show a list of available commands and their usage'),
+        new SlashCommandBuilder()
+            .setName('add_permissions')
+            .setDescription('Add specific permission tags to a user or role.')
+            .addStringOption(option =>
+                option.setName('tags')
+                    .setDescription('The tags (users, roles or the everyone tag) to add permissions to, space-separated.')
+                    .setRequired(true))
+            .addStringOption(option =>
+                option.setName('commands')
+                    .setDescription('The commands to add permissions for, space-separated.')
+                    .setRequired(true)),
+        new SlashCommandBuilder()
+            .setName('remove_permissions')
+            .setDescription('Remove specific permission tags from a user or role.')
+            .addStringOption(option =>
+                option.setName('tags')
+                    .setDescription('The tags (users, roles or the everyone tag) to add permissions to, space-separated.')
+                    .setRequired(true))
+            .addStringOption(option =>
+                option.setName('commands')
+                    .setDescription('The commands to remove permissions for, space-separated.')
+                    .setRequired(true))
     ];
 
     // Trying to register commands globally, but it may take more time
     await client.application.commands.set(commands)
     await loadMeetings();
+    await loadPermissions();
 });
 
 client.on('messageCreate', async (message) => {
@@ -430,8 +581,8 @@ client.on('messageCreate', async (message) => {
 
     switch (command) {
         case 'add_meeting': {
-            // if (interaction.guild && !interaction.member.roles.cache.has(adminRoleId))
-            //     return interaction.reply('❌ You do not have permission to schedule meetings.');
+            if (message.guild && !await checkPermission(message.author, "add_meeting", message.guild))
+                return message.reply({content: "You don't have permission to run this command.",});
 
             // Now, assign the parsed arguments
             const details = args[0]; // Meeting details
@@ -469,7 +620,6 @@ client.on('messageCreate', async (message) => {
             const resolvedMentions = [];
             if (tags) {
                 const mentions = tags.match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
-
                 if (mentions)
                     for (const mention of mentions)
                         try {
@@ -513,7 +663,93 @@ client.on('messageCreate', async (message) => {
             break;
         }
 
+        case 'add_permissions': {
+            // args[0] -> tags (quoted string that can contain spaces)
+            // args[1] -> commands (quoted string that will be split on spaces)
+            if (args.length < 2)
+                return message.reply("💡 Usage: !add_permissions \"tags\" \"commands\"");
+
+            const tags = args[0].match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
+            const commands = args[1].trim().split(' ');
+            const guild = message.guild;
+            const author = message.author;
+
+            if (!guild)
+                return message.reply("This command can only be used in a server.");
+
+            // Check if the author has permission to add permissions.
+            if (!await checkPermission(author, "add_permissions", guild))
+                return message.reply("You don't have permission to run this command.");
+
+            const result = await addPermission(tags, commands, guild, author);
+            switch (result.status_code) {
+                case 405:
+                    await message.reply(`Invalid command ${result.err}.`);
+                    break;
+                case 500:
+                    await message.reply(`Internal Error: ${result.err}.`);
+                    break;
+                case 404:
+                    await message.reply(`Invalid user or role mention ${result.err}.`);
+                    break;
+                case 200:
+                    await message.reply(`Successfully added permissions for '${commands.join(', ')}' to '${result.output.join(', ')}'.`);
+                    break;
+                default:
+                    console.error('Unknown Status code:', result.status_code);
+                    await message.reply("Failed to add permissions, check logs.");
+            }
+            break;
+        }
+
+        case 'remove_permissions': {
+            // args[0] -> tags (quoted string that can contain spaces)
+            // args[1] -> commands (quoted string that will be split on spaces)
+            if (args.length < 2)
+                return message.reply("💡 Usage: !remove_permissions \"tags\" \"commands\"");
+
+            const tags = args[0].match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
+            const commands = args[1].trim().split(' ');
+            const guild = message.guild;
+            const author = message.author;
+
+            if (!guild)
+                return message.reply("This command can only be used in a server.");
+
+            // Check if the author has permission to remove permissions
+            if (!await checkPermission(author, "remove_permissions", guild))
+                return message.reply("You don't have permission to run this command.");
+
+            const result = await removePermission(tags, commands, guild, author);
+
+            switch (result.status_code) {
+                case 405:
+                    await message.reply(`Invalid command ${result.err}.`);
+                    break;
+
+                case 500:
+                    await message.reply(`Internal error: ${result.err}.`);
+                    break;
+
+                case 404:
+                    await message.reply(`Invalid user or role mention ${result.err}.`);
+                    break;
+
+                case 200:
+                    await message.reply(`Successfully removed permissions for '${commands.join(', ')}' from '${result.output.join(', ')}'.`);
+                    break;
+
+                default:
+                    console.error('Unknown status code:', result.status_code);
+                    await message.reply("Failed to remove permissions, check logs.");
+            }
+            break;
+        }
+
         case 'remind':
+            if (message.guild && !await checkPermission(message.author, "remind", message.guild))
+                return message.reply({content: "You don't have permission to run this command.",});
+
             const meetingID = args[0]
             if (!meetings[meetingID])
                 return message.reply('❌ No meeting found with that ID.');
@@ -524,6 +760,9 @@ client.on('messageCreate', async (message) => {
             return;
 
         case 'meetings':
+            if (message.guild && !await checkPermission(message.author, "meetings", message.guild))
+                return message.reply({content: "You don't have permission to run this command.",});
+
             if (!Object.keys(meetings).length)
                 return message.reply('There are no meetings currently scheduled.');
 
@@ -576,6 +815,9 @@ client.on('messageCreate', async (message) => {
             break;
 
         case 'remove_meeting':
+            if (message.guild && !await checkPermission(message.author, "remove_meeting", message.guild))
+                return message.reply({content: "You don't have permission to run this command.",});
+
             const meetingId = args[0];
             if (!meetings[meetingId]) {
                 const noMeetingEmbed = new EmbedBuilder()
@@ -601,36 +843,21 @@ client.on('messageCreate', async (message) => {
 
             break;
 
-        case 'select_role':
-            if (user.id !== message.guild.ownerId)
-                return message.reply('❌ Only the server owner can select the admin role.');
-
-            const role = args[0];
-            adminRoleId = role.id;
-            await message.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
-
-            break;
-
-        case 'remove_role':
-            if (message.author.id !== message.guild.ownerId)
-                return message.reply('❌ Only the server owner can remove the admin role.');
-
-            adminRoleId = null;
-            await message.reply('✅ Admin role has been removed.');
-            break;
-
         case 'help':
+            if (message.guild && !await checkPermission(message.author, "help", message.guild))
+                return message.reply({content: "You don't have permission to run this command.",});
+
             const helpEmbed = new EmbedBuilder()
                 .setColor(0x0099ff)
                 .setTitle('Shellmates Meeting Bot - Help')
                 .setDescription('Here are the commands you can use:')
                 .addFields(
-                    { name: '!addmeeting', value: 'Schedule a new meeting.' },
-                    { name: '!meetings', value: 'View all scheduled meetings.' },
-                    { name: '!removemeeting', value: 'Remove a scheduled meeting by its ID.' },
-                    { name: '!selectrole', value: 'Set the role that can manage meetings.' },
-                    { name: '!removerole', value: 'Remove the selected admin role.' },
-                    { name: '!remind', value: 'Manually send a reminder for an existing meeting.' },
+                    { name: '/addmeeting', value: 'Schedule a new meeting.' },
+                    { name: '/meetings', value: 'View all scheduled meetings.' },
+                    { name: '/removemeeting', value: 'Remove a scheduled meeting by its ID.' },
+                    { name: '/remind', value: 'Manually send a reminder for an existing meeting.' },
+                    { name: '/add_permissions', value: 'Add permission for specific commands to specific tags (accounts, roles or the everyone tag)' },
+                    { name: '/remove_permissions', value: 'Remove permission for specific commands to specific tags (accounts, roles or the everyone tag)' },
                 )
                 .setTimestamp()
                 .setFooter({ text: 'Created by Shellmates' });
@@ -650,8 +877,8 @@ client.on('interactionCreate', async (interaction) => {
     const { commandName, options, user } = interaction;
     switch (commandName) {
         case 'add_meeting': {
-            // if (interaction.guild && !interaction.member.roles.cache.has(adminRoleId))
-            //     return interaction.reply('❌ You do not have permission to schedule meetings.');
+            if (interaction.guild && !await checkPermission(interaction.user, "add_meeting", interaction.guild))
+                return interaction.reply({content: "You don't have permission to run this command.",});
 
             const details = options.getString('details');
             const date = options.getString('date');
@@ -732,7 +959,87 @@ client.on('interactionCreate', async (interaction) => {
             break;
         }
 
+        case 'add_permissions': {
+            const tags = options.getString('tags').match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
+            const commands = options.getString('commands').trim().split(' ');
+            const guild = interaction.guild;
+            const author = interaction.user;
+
+            if (!guild)
+                return interaction.reply({content: "This command can only be used in a server."});
+
+            if (!await checkPermission(author, "add_permissions", guild))
+                return interaction.reply({content: "You don't have permission to run this command.",});
+
+            const result = await addPermission(tags, commands, guild, author)
+            switch (result.status_code) {
+                case 405:
+                    await interaction.reply({content: `Invalid Command ${result.err}.`})
+                    break;
+
+                case 500:
+                    await interaction.reply({content: `Internal Error: ${result.err}.`})
+                    break;
+
+                case 404:
+                    await interaction.reply({content: `Invalid user or role mention ${result.err}`, });
+                    break;
+
+                case 200:
+                    await interaction.reply({content: `Successfully added permissions for '${commands.join(', ')}' to '${result.output.join(', ')}'.`});
+                    break;
+                default:
+                    console.error('Unknown Status code:', result.status_code);
+                    await interaction.reply({content: `Failed to add permissions, check logs.`});
+            }
+            break;
+        }
+
+        case 'remove_permissions': {
+            const tags = options.getString('tags').match(/<@!?(\d+)>|<@&(\d+)>|@\w+/g);
+            const commands = options.getString('commands').trim().split(' ');
+            const guild = interaction.guild;
+            const author = interaction.user;
+
+            if (!guild)
+                return interaction.reply({ content: "This command can only be used in a server."});
+
+            // Check if the user has permission to remove permissions
+            if (!await checkPermission(author, "remove_permissions", guild))
+                return interaction.reply({ content: "You don't have permission to run this command."});
+
+            const result = await removePermission(tags, commands, guild, author);
+            switch (result.status_code) {
+                case 405:
+                    await interaction.reply({ content: `Invalid command ${result.err}.`});
+                    break;
+
+                case 500:
+                    await interaction.reply({ content: `Internal error: ${result.err}.`});
+                    break;
+
+                case 404:
+                    await interaction.reply({ content: `Invalid user or role mention ${result.err}.`});
+                    break;
+
+                case 200:
+                    await interaction.reply({
+                        content: `Successfully removed permissions for '${commands.join(', ')}' from '${result.output.join(', ')}'.`,
+                        ephemeral: true
+                    });
+                    break;
+
+                default:
+                    console.error('Unknown Status code:', result.status_code);
+                    await interaction.reply({ content: `Failed to remove permissions, check logs.`});
+            }
+            break;
+        }
+
         case 'remind':
+            if (interaction.guild && !await checkPermission(interaction.user, "remind", interaction.guild))
+                return interaction.reply({content: "You don't have permission to run this command.",});
+
             const meetingID = options.getString('id');
             if (!meetings[meetingID])
                 return interaction.reply('❌ No meeting found with that ID.');
@@ -742,7 +1049,10 @@ client.on('interactionCreate', async (interaction) => {
             await sendReminder(meetingID, false)
             return;
 
-        case 'meetings':
+        case 'meetings': {
+            if (interaction.guild && !await checkPermission(interaction.user, "meetings", interaction.guild))
+                return interaction.reply({content: "You don't have permission to run this command.",});
+
             if (!Object.keys(meetings).length)
                 return interaction.reply('There are no meetings currently scheduled.');
 
@@ -751,7 +1061,7 @@ client.on('interactionCreate', async (interaction) => {
             let guild = interaction.guild;
 
             const meetingPromises = Object.keys(meetings).map(async (meetingId) => {
-                const { meetingDate, details, comment, resolvedMentions, channelId } = meetings[meetingId];
+                const {meetingDate, details, comment, resolvedMentions, channelId} = meetings[meetingId];
                 const meetingDateObject = new Date(meetingDate);
                 if (channelId === interaction.channelId) {
                     const targets = await Promise.all(resolvedMentions?.map(async (mention) => {
@@ -760,8 +1070,7 @@ client.on('interactionCreate', async (interaction) => {
                             const roleId = mention.slice(3, -1); // Removes <@& and >
                             const role = await guild.roles.fetch(roleId);
                             return `@${role.name}`; // Display the role name with @
-                        }
-                        else if (mention.startsWith('<@')) {
+                        } else if (mention.startsWith('<@')) {
                             // For user mentions (e.g., <@userID>)
                             let id = mention.slice(2, -1);
                             if (id === interaction.user.id)
@@ -793,8 +1102,12 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply(msg1 + displayedMeetings);
 
             break;
+        }
 
         case 'remove_meeting':
+            if (interaction.guild && !await checkPermission(interaction.user, "remove_meeting", interaction.guild))
+                return interaction.reply({content: "You don't have permission to run this command.",});
+
             const meetingId = options.getString('id');
             if (!meetings[meetingId]) {
                 const noMeetingEmbed = new EmbedBuilder()
@@ -820,26 +1133,10 @@ client.on('interactionCreate', async (interaction) => {
 
             break;
 
-        case 'select_role':
-            if (user.id !== interaction.guild.ownerId)
-                return interaction.reply('❌ Only the server owner can select the admin role.');
-
-            const role = options.getRole('role');
-            adminRoleId = role.id;
-            await interaction.reply(`✅ Role **${role.name}** has been selected as the admin role.`);
-
-            break;
-
-        case 'remove_role':
-            if (user.id !== interaction.guild.ownerId)
-                return interaction.reply('❌ Only the server owner can remove the admin role.');
-
-            adminRoleId = null;
-            await interaction.reply('✅ Admin role has been removed.');
-
-            break;
-
         case 'help':
+            if (interaction.guild && !await checkPermission(interaction.user, "help", interaction.guild))
+                return interaction.reply({content: "You don't have permission to run this command.",});
+
             const helpEmbed = new EmbedBuilder()
                 .setColor(0x0099ff)
                 .setTitle('Shellmates Meeting Bot - Help')
@@ -848,9 +1145,9 @@ client.on('interactionCreate', async (interaction) => {
                     { name: '/addmeeting', value: 'Schedule a new meeting.' },
                     { name: '/meetings', value: 'View all scheduled meetings.' },
                     { name: '/removemeeting', value: 'Remove a scheduled meeting by its ID.' },
-                    { name: '/selectrole', value: 'Set the role that can manage meetings.' },
-                    { name: '/removerole', value: 'Remove the selected admin role.' },
                     { name: '/remind', value: 'Manually send a reminder for an existing meeting.' },
+                    { name: '/add_permissions', value: 'Add permission for specific commands to specific tags (accounts, roles or the everyone tag)' },
+                    { name: '/remove_permissions', value: 'Remove permission for specific commands to specific tags (accounts, roles or the everyone tag)' },
                 )
                 .setTimestamp()
                 .setFooter({ text: 'Created by Shellmates' });

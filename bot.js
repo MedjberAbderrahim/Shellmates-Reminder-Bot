@@ -777,20 +777,20 @@ client.on('messageCreate', async (message) => {
                             // For role mentions (e.g., <@&roleID>)
                             const roleId = mention.slice(3, -1); // Removes <@& and >
                             const role = await guild.roles.fetch(roleId);
-                            return `@${role.name}`; // Display the role name with @
+                            return `\\@${role.name}`; // Display the role name with @
                         }
                         else if (mention.startsWith('<@')) {
                             // For user mentions (e.g., <@userID>)
                             let id = mention.slice(2, -1);
                             if (id === message.author.id)
-                                return `@${message.author.username}`;
+                                return `\\@${message.author.username}`;
                             if (id === client.user.id)
-                                return `@${client.user.username}`;
+                                return `\\@${client.user.username}`;
 
                             const user = await guild.members.fetch(id);
-                            return `@${user.user.username}`; // Display the username with @
+                            return `\\@${user.user.username}`; // Display the username with @
                         }
-                        return mention; // If it's already a plain text mention, return as is
+                        return '\\' + mention; // If it's already a plain text mention, return as is
                     }));
 
                     // Format the meeting details more clearly
@@ -864,7 +864,7 @@ client.on('messageCreate', async (message) => {
             break;
 
         default:
-            await message.reply('Invalid Command!')
+            await message.reply(`❌ Invalid Command '${command}' !`)
             break;
     }
 });
@@ -1067,19 +1067,19 @@ client.on('interactionCreate', async (interaction) => {
                             // For role mentions (e.g., <@&roleID>)
                             const roleId = mention.slice(3, -1); // Removes <@& and >
                             const role = await guild.roles.fetch(roleId);
-                            return `@${role.name}`; // Display the role name with @
+                            return `\\@${role.name}`; // Display the role name with @
                         } else if (mention.startsWith('<@')) {
                             // For user mentions (e.g., <@userID>)
                             let id = mention.slice(2, -1);
                             if (id === interaction.user.id)
-                                return `@${interaction.user.username}`;
+                                return `\\@${interaction.user.username}`;
                             if (id === client.user.id)
-                                return `@${client.user.username}`;
+                                return `\\@${client.user.username}`;
 
                             const user = await guild.members.fetch(id);
-                            return `@${user.user.username}`; // Display the username with @
+                            return `\\@${user.user.username}`; // Display the username with @
                         }
-                        return mention; // If it's already a plain text mention, return as is
+                        return "\\" + mention; // If it's already a plain text mention, return as is
                     }));
 
                     // Format the meeting details more clearly
@@ -1152,6 +1152,10 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.reply({ embeds: [helpEmbed] });
 
+            break;
+
+        default:
+            await interaction.reply(`❌ Invalid Command '${commandName}' !`)
             break;
     }
 });
